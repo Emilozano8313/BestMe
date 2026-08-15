@@ -2,6 +2,12 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // The unit tests under utils/__tests__ run on Node (`npm test`), so the
+    // Node globals need to be in scope for type-checking. This does not pull
+    // anything into the app bundle — Metro only follows real imports.
+    "types": [
+      "node"
+    ],
     "paths": {
       "@/*": [
         "./*"

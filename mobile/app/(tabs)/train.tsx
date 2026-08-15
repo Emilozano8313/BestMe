@@ -1,16 +1,30 @@
 /**
- * BestMe — Biomechanical Coach (Train Screen)
- * ============================================
- * Simulates a real-time Edge AI camera feed analyzing squats.
- * Connects to the biomechanics engine for kinematics and triggers alerts.
+ * BestMe — Trainer
+ * ==================
+ * Logs a workout and computes the calories burned server-side (MET).
+ *
+ * Two modes:
+ *
+ *   Camera analysis — counts reps and checks technique on-device via
+ *     MoveNet. Needs react-native-vision-camera + react-native-fast-tflite,
+ *     which only load in a Development Build (see ENTRENADOR.md).
+ *
+ *   Manual logging — always available. You enter reps and weight yourself.
+ *
+ * The previous version *simulated* the camera: it fed `generateMockSquatFrame()`
+ * into the engine and saved the resulting fake reps to the database as if
+ * they were real. Recording invented workout data is worse than recording
+ * none, so that path is gone.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   StyleSheet,
+  ScrollView,
   View,
   Text,
   Pressable,
+  TextInput,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -20,230 +34,290 @@ import { Ionicons } from '@expo/vector-icons';
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
 import { GlassCard } from '@/components/ui/GlassCard';
-import { BiomechanicsState, processSquatFrame, generateMockSquatFrame } from '@/utils/biomechanics';
+import { getPoseDetectionStatus } from '@/utils/poseDetector';
 import api from '@/services/api';
 
+// MET values the backend recognises; anything else falls back to 4.0.
+const EXERCISES = [
+  { value: 'squat', label: 'Sentadillas', icon: 'body-outline', muscles: 'Cuádriceps · Glúteos' },
+  { value: 'pushup', label: 'Flexiones', icon: 'fitness-outline', muscles: 'Pecho · Tríceps' },
+  { value: 'deadlift', label: 'Peso Muerto', icon: 'barbell-outline', muscles: 'Espalda · Isquios' },
+  { value: 'bench_press', label: 'Press Banca', icon: 'arrow-up-outline', muscles: 'Pecho · Hombros' },
+] as const;
+
+interface SetEntry {
+  reps: string;
+  weight: string;
+}
+
+interface WorkoutSaved {
+  calories_burned: number;
+  total_reps: number;
+  total_sets: number;
+}
+
 export default function TrainScreen() {
-  const [isActive, setIsActive] = useState(false);
+  const poseStatus = useMemo(() => getPoseDetectionStatus(), []);
+
+  const [exercise, setExercise] = useState<string>('squat');
+  const [sets, setSets] = useState<SetEntry[]>([{ reps: '', weight: '' }]);
+  const [durationMin, setDurationMin] = useState('20');
   const [isSaving, setIsSaving] = useState(false);
-  const [sessionDuration, setSessionDuration] = useState(0);
-  
-  const [bioState, setBioState] = useState<BiomechanicsState>({
-    reps: 0,
-    phase: 'standing',
-    formScore: 1.0,
-    issues: [],
-    lastHipAngle: 180,
-    lastKneeAngle: 180,
-  });
+  const [lastSaved, setLastSaved] = useState<WorkoutSaved | null>(null);
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const frameLoopRef = useRef<number>(0);
-  const startTimeRef = useRef<number>(0);
+  const addSet = useCallback(() => {
+    setSets((current) => [...current, { reps: '', weight: current.at(-1)?.weight ?? '' }]);
+  }, []);
 
-  // ── Session Timer ──────────────────────────────────────────────
-  useEffect(() => {
-    if (isActive) {
-      timerRef.current = setInterval(() => {
-        setSessionDuration(prev => prev + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isActive]);
+  const removeSet = useCallback((index: number) => {
+    setSets((current) => (current.length === 1 ? current : current.filter((_, i) => i !== index)));
+  }, []);
 
-  // ── Edge AI Simulation Loop (30 fps) ──────────────────────────
-  useEffect(() => {
-    let animationFrameId: number;
-    let t = 0; // Time parameter for the squat sine wave
-    let direction = 1;
+  const updateSet = useCallback((index: number, field: keyof SetEntry, value: string) => {
+    setSets((current) =>
+      current.map((set, i) => (i === index ? { ...set, [field]: value } : set)),
+    );
+  }, []);
 
-    const loop = () => {
-      if (isActive) {
-        // Generate mock landmarks
-        const landmarks = generateMockSquatFrame(t);
-        
-        // Process them through the Kinematics engine
-        setBioState((prevState) => processSquatFrame(landmarks, prevState));
+  const totalReps = sets.reduce((sum, set) => sum + (parseInt(set.reps, 10) || 0), 0);
 
-        // Advance the sine wave slowly (simulates 1 rep every 4 seconds)
-        t += 0.01 * direction;
-        if (t >= 1) {
-          t = 1;
-          direction = -1;
-        } else if (t <= 0) {
-          t = 0;
-          direction = 1;
-        }
-      }
-      animationFrameId = requestAnimationFrame(loop);
-    };
-
-    if (isActive) {
-      loop();
-    }
-
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [isActive]);
-
-  // ── Handlers ──────────────────────────────────────────────────
-  const toggleWorkout = () => {
-    if (!isActive && bioState.reps > 0) {
-      // If stopped and we have reps, we should save it, not resume
+  const handleSave = useCallback(async () => {
+    const duration = parseFloat(durationMin.replace(',', '.'));
+    if (!Number.isFinite(duration) || duration <= 0) {
+      Alert.alert('Duración no válida', 'Introduce cuántos minutos duró la sesión.');
       return;
     }
-    setIsActive(!isActive);
-  };
-
-  const finishWorkout = async () => {
-    setIsActive(false);
-    
-    if (bioState.reps === 0) {
-      Alert.alert('Entrenamiento vacío', 'No completaste ninguna repetición.');
+    if (totalReps <= 0) {
+      Alert.alert('Sin repeticiones', 'Añade al menos una serie con repeticiones.');
       return;
     }
 
+    const startedAt = new Date(Date.now() - duration * 60_000).toISOString();
+
+    setIsSaving(true);
     try {
-      setIsSaving(true);
-      
-      const payload = {
-        exercise_name: 'squat',
-        total_reps: bioState.reps,
-        duration_seconds: sessionDuration,
-        analysis_summary: { issues: Array.from(new Set(bioState.issues)) }, // unique issues
-        sets: [
-          {
-            set_number: 1,
-            reps: bioState.reps,
-            weight_kg: 0, // bodyweight
-            form_score: bioState.formScore,
-            issues: Array.from(new Set(bioState.issues)),
-          }
-        ]
-      };
+      const res = await api.post<WorkoutSaved>('/workouts/', {
+        exercise_name: exercise,
+        total_reps: totalReps,
+        duration_seconds: Math.round(duration * 60),
+        started_at: startedAt,
+        sets: sets
+          .filter((set) => (parseInt(set.reps, 10) || 0) > 0)
+          .map((set, index) => ({
+            set_number: index + 1,
+            reps: parseInt(set.reps, 10) || 0,
+            weight_kg: parseFloat(set.weight.replace(',', '.')) || 0,
+            // Recorded manually, so there is no measured technique score.
+            // Reporting a fabricated one would poison the history.
+            form_score: 1.0,
+            issues: [],
+          })),
+        analysis_summary: { source: 'manual' },
+      });
 
-      const res = await api.post<{ calories_burned: number }>('/workouts/', payload);
+      if (res.error || !res.data) {
+        throw new Error(res.error ?? 'No se pudo guardar la sesión');
+      }
 
-      if (res.error || !res.data) throw new Error(res.error ?? 'No se pudo guardar la sesión');
-
-      Alert.alert(
-        '¡Sesión Guardada!',
-        `Quemaste ${Math.round(res.data.calories_burned)} kcal.\nTu técnica fue del ${Math.round(bioState.formScore * 100)}%.`
-      );
-
-      // Reset
-      setBioState({ reps: 0, phase: 'standing', formScore: 1.0, issues: [], lastHipAngle: 180, lastKneeAngle: 180 });
-      setSessionDuration(0);
-      
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+      setLastSaved(res.data);
+      setSets([{ reps: '', weight: '' }]);
+    } catch (error: any) {
+      Alert.alert('Error', error?.message ?? 'No se pudo guardar la sesión.');
     } finally {
       setIsSaving(false);
     }
-  };
-
-  // ── Render Helpers ────────────────────────────────────────────
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60).toString().padStart(2, '0');
-    const s = (secs % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
-  const currentIssues = Array.from(new Set(bioState.issues));
-  const hasAlerts = isActive && currentIssues.length > 0;
+  }, [exercise, sets, durationMin, totalReps]);
 
   return (
     <View style={styles.screen}>
       <LinearGradient colors={[palette.dark900, palette.dark800]} style={styles.gradient}>
-        
-        {/* Mock Camera Viewfinder */}
-        <View style={styles.cameraContainer}>
-          {isActive ? (
-            <View style={styles.cameraActive}>
-              <Ionicons name="scan-outline" size={80} color="rgba(16, 185, 129, 0.3)" />
-              <Text style={styles.aiText}>Procesando MediaPipe a 30fps...</Text>
-              
-              {/* Dynamic Overlay Phase Indicator */}
-              <View style={styles.phaseIndicator}>
-                <Text style={styles.phaseText}>Fase: {bioState.phase.toUpperCase()}</Text>
-              </View>
-            </View>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>Entrenamiento</Text>
+            <Text style={styles.subtitle}>Registra tu sesión y calcula lo que quemas.</Text>
+          </View>
+
+          {/* Camera analysis availability */}
+          {poseStatus.available ? (
+            <Pressable>
+              <LinearGradient
+                colors={[palette.emerald, palette.cyan]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0.8 }}
+                style={styles.ctaGradient}
+              >
+                <View style={styles.ctaRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ctaTitle}>Análisis con cámara</Text>
+                    <Text style={styles.ctaDesc}>
+                      Cuenta repeticiones y revisa tu técnica en tiempo real.
+                    </Text>
+                  </View>
+                  <Ionicons name="videocam" size={30} color="rgba(255,255,255,0.9)" />
+                </View>
+              </LinearGradient>
+            </Pressable>
           ) : (
-            <View style={styles.cameraIdle}>
-              <Ionicons name="videocam-outline" size={60} color={palette.gray500} />
-              <Text style={styles.idleText}>Cámara lista. Toca Iniciar.</Text>
-            </View>
-          )}
-
-          {/* Injury Prevention Alerts */}
-          {hasAlerts && (
-            <View style={styles.alertOverlay}>
-              <Ionicons name="warning-outline" size={24} color={palette.coral} />
-              <View style={{ marginLeft: 8 }}>
-                {currentIssues.includes('lumbar_rounding') && <Text style={styles.alertText}>¡Cuidado con la espalda baja!</Text>}
-                {currentIssues.includes('knee_valgus') && <Text style={styles.alertText}>¡Evita que las rodillas colapsen!</Text>}
+            <GlassCard style={styles.noticeCard}>
+              <View style={styles.noticeRow}>
+                <Ionicons name="information-circle-outline" size={20} color={palette.amber} />
+                <Text style={styles.noticeTitle}>Análisis con cámara no disponible</Text>
               </View>
-            </View>
+              <Text style={styles.noticeText}>
+                Contar repeticiones con la cámara necesita módulos nativos que Expo Go no
+                puede cargar. Requiere un Development Build — los pasos están en{' '}
+                <Text style={styles.noticeMono}>ENTRENADOR.md</Text>.
+              </Text>
+              <Text style={styles.noticeText}>
+                Mientras tanto puedes registrar la sesión a mano: las calorías se calculan
+                igual con la fórmula MET.
+              </Text>
+            </GlassCard>
           )}
-        </View>
 
-        {/* Real-time HUD */}
-        <View style={styles.hud}>
-          <GlassCard style={styles.hudCard} variant={isActive ? 'highlight' : 'default'}>
-            <Text style={styles.hudLabel}>REPS</Text>
-            <Text style={styles.hudValue}>{bioState.reps}</Text>
+          {/* Exercise picker */}
+          <Text style={styles.sectionTitle}>Ejercicio</Text>
+          <View style={styles.exerciseGrid}>
+            {EXERCISES.map((item) => {
+              const active = exercise === item.value;
+              return (
+                <Pressable
+                  key={item.value}
+                  onPress={() => setExercise(item.value)}
+                  style={[styles.exerciseCard, active && styles.exerciseCardActive]}
+                >
+                  <Ionicons
+                    name={item.icon as any}
+                    size={24}
+                    color={active ? palette.emerald : palette.gray400}
+                  />
+                  <Text style={[styles.exerciseName, active && { color: palette.white }]}>
+                    {item.label}
+                  </Text>
+                  <Text style={styles.exerciseMuscles}>{item.muscles}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Sets */}
+          <Text style={styles.sectionTitle}>Series</Text>
+          <GlassCard style={styles.setsCard}>
+            <View style={styles.setHeaderRow}>
+              <Text style={[styles.setHeaderText, { width: 34 }]}>#</Text>
+              <Text style={[styles.setHeaderText, { flex: 1 }]}>Reps</Text>
+              <Text style={[styles.setHeaderText, { flex: 1 }]}>Peso (kg)</Text>
+              <View style={{ width: 30 }} />
+            </View>
+
+            {sets.map((set, index) => (
+              <View key={index} style={styles.setRow}>
+                <Text style={styles.setNumber}>{index + 1}</Text>
+                <TextInput
+                  style={styles.setInput}
+                  value={set.reps}
+                  onChangeText={(value) => updateSet(index, 'reps', value)}
+                  keyboardType="number-pad"
+                  placeholder="12"
+                  placeholderTextColor={palette.gray500}
+                />
+                <TextInput
+                  style={styles.setInput}
+                  value={set.weight}
+                  onChangeText={(value) => updateSet(index, 'weight', value)}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={palette.gray500}
+                />
+                <Pressable onPress={() => removeSet(index)} style={styles.removeBtn}>
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color={sets.length === 1 ? palette.gray500 : palette.coral}
+                  />
+                </Pressable>
+              </View>
+            ))}
+
+            <Pressable onPress={addSet} style={styles.addSetBtn}>
+              <Ionicons name="add-circle-outline" size={18} color={palette.emerald} />
+              <Text style={styles.addSetText}>Añadir serie</Text>
+            </Pressable>
           </GlassCard>
 
-          <GlassCard style={styles.hudCard}>
-            <Text style={styles.hudLabel}>TÉCNICA</Text>
-            <Text style={[styles.hudValue, { color: bioState.formScore > 0.8 ? palette.emerald : palette.amber }]}>
-              {Math.round(bioState.formScore * 100)}%
+          {/* Duration */}
+          <Text style={styles.sectionTitle}>Duración</Text>
+          <GlassCard style={styles.durationCard}>
+            <View style={styles.durationRow}>
+              <Ionicons name="time-outline" size={20} color={palette.cyan} />
+              <TextInput
+                style={styles.durationInput}
+                value={durationMin}
+                onChangeText={setDurationMin}
+                keyboardType="number-pad"
+              />
+              <Text style={styles.durationUnit}>minutos</Text>
+            </View>
+            <Text style={styles.durationHint}>
+              Las calorías salen de la fórmula MET: intensidad del ejercicio × tu peso ×
+              tiempo. La duración es lo que más pesa en el resultado.
             </Text>
           </GlassCard>
 
-          <GlassCard style={styles.hudCard}>
-            <Text style={styles.hudLabel}>TIEMPO</Text>
-            <Text style={styles.hudValue}>{formatTime(sessionDuration)}</Text>
+          {/* Summary + save */}
+          <GlassCard style={styles.summaryCard} variant="highlight">
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryValue}>{sets.length}</Text>
+                <Text style={styles.summaryLabel}>Series</Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryValue}>{totalReps}</Text>
+                <Text style={styles.summaryLabel}>Reps totales</Text>
+              </View>
+            </View>
           </GlassCard>
-        </View>
 
-        {/* Controls */}
-        <View style={styles.controls}>
-          {!isActive && bioState.reps === 0 && (
-            <Pressable style={styles.mainBtn} onPress={toggleWorkout}>
-              <LinearGradient colors={[palette.emerald, palette.cyan]} style={styles.btnGradient}>
-                <Ionicons name="play" size={24} color={palette.white} />
-                <Text style={styles.btnText}>Iniciar Sentadillas</Text>
-              </LinearGradient>
-            </Pressable>
-          )}
+          <Pressable style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>
+            <LinearGradient
+              colors={[palette.emerald, palette.cyan]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.saveGradient}
+            >
+              {isSaving ? (
+                <ActivityIndicator color={palette.white} />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-done" size={22} color={palette.white} />
+                  <Text style={styles.saveText}>Guardar sesión</Text>
+                </>
+              )}
+            </LinearGradient>
+          </Pressable>
 
-          {isActive && (
-            <Pressable style={styles.mainBtn} onPress={toggleWorkout}>
-              <LinearGradient colors={[palette.coral, '#ff4757']} style={styles.btnGradient}>
-                <Ionicons name="stop" size={24} color={palette.white} />
-                <Text style={styles.btnText}>Pausar</Text>
-              </LinearGradient>
-            </Pressable>
-          )}
+          {lastSaved ? (
+            <GlassCard style={styles.savedCard}>
+              <View style={styles.noticeRow}>
+                <Ionicons name="flame" size={20} color={palette.coral} />
+                <Text style={styles.savedTitle}>
+                  Quemaste {Math.round(lastSaved.calories_burned)} kcal
+                </Text>
+              </View>
+              <Text style={styles.noticeText}>
+                {lastSaved.total_sets} series · {lastSaved.total_reps} repeticiones.
+                Ya está sumado a tu balance de hoy.
+              </Text>
+            </GlassCard>
+          ) : null}
 
-          {!isActive && bioState.reps > 0 && (
-            <Pressable style={styles.mainBtn} onPress={finishWorkout} disabled={isSaving}>
-              <LinearGradient colors={[palette.emerald, palette.cyan]} style={styles.btnGradient}>
-                {isSaving ? <ActivityIndicator color={palette.white} /> : (
-                  <>
-                    <Ionicons name="checkmark-done" size={24} color={palette.white} />
-                    <Text style={styles.btnText}>Guardar Sesión</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </Pressable>
-          )}
-        </View>
-
+          <View style={{ height: Spacing['4xl'] }} />
+        </ScrollView>
       </LinearGradient>
     </View>
   );
@@ -251,94 +325,163 @@ export default function TrainScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  gradient: { flex: 1, paddingTop: 60, paddingHorizontal: Spacing.lg },
-  
-  cameraContainer: {
-    flex: 1,
-    backgroundColor: palette.dark900,
-    borderRadius: BorderRadius.xl,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    marginBottom: Spacing.xl,
-    position: 'relative',
+  gradient: { flex: 1 },
+  scrollContent: { paddingHorizontal: Spacing.lg, paddingTop: 60 },
+
+  header: { marginBottom: Spacing.xl },
+  title: {
+    color: palette.white,
+    fontSize: Typography.size['3xl'],
+    fontWeight: Typography.weight.bold,
   },
-  cameraIdle: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  idleText: { color: palette.gray400, marginTop: Spacing.sm },
-  
-  cameraActive: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0a0f18',
+  subtitle: { color: palette.gray300, fontSize: Typography.size.md, marginTop: 4 },
+
+  ctaGradient: { borderRadius: BorderRadius.xl, padding: Spacing.lg, marginBottom: Spacing.xl },
+  ctaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  ctaTitle: {
+    color: palette.white,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.bold,
   },
-  aiText: {
-    color: palette.emerald,
-    marginTop: Spacing.md,
+  ctaDesc: { color: 'rgba(255,255,255,0.8)', fontSize: Typography.size.sm, marginTop: 2 },
+
+  noticeCard: { marginBottom: Spacing.xl, padding: Spacing.lg },
+  noticeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
+  noticeTitle: {
+    color: palette.white,
+    fontSize: Typography.size.base,
+    fontWeight: Typography.weight.semibold,
+    flex: 1,
+  },
+  noticeText: {
+    color: palette.gray300,
     fontSize: Typography.size.sm,
-    opacity: 0.8,
+    lineHeight: 20,
+    marginBottom: Spacing.sm,
   },
-  phaseIndicator: {
-    position: 'absolute',
-    bottom: Spacing.md,
-    left: Spacing.md,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.full,
-  },
-  phaseText: { color: palette.cyan, fontSize: Typography.size.xs, fontWeight: Typography.weight.bold },
+  noticeMono: { color: palette.cyan, fontWeight: Typography.weight.bold },
 
-  alertOverlay: {
-    position: 'absolute',
-    top: Spacing.md,
-    left: Spacing.md,
-    right: Spacing.md,
-    backgroundColor: 'rgba(255, 107, 107, 0.9)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
+  sectionTitle: {
+    color: palette.white,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.semibold,
+    marginBottom: Spacing.base,
   },
-  alertText: { color: palette.white, fontWeight: Typography.weight.bold, fontSize: Typography.size.sm },
 
-  hud: {
+  exerciseGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: Spacing.sm,
+    flexWrap: 'wrap',
+    gap: Spacing.md,
     marginBottom: Spacing.xl,
   },
-  hudCard: {
-    flex: 1,
+  exerciseCard: {
+    width: '47%',
     alignItems: 'center',
-    paddingVertical: Spacing.md,
+    paddingVertical: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  hudLabel: {
+  exerciseCardActive: {
+    borderColor: palette.emerald,
+    backgroundColor: 'rgba(0, 214, 143, 0.08)',
+  },
+  exerciseName: {
+    color: palette.gray300,
+    fontSize: Typography.size.base,
+    fontWeight: Typography.weight.semibold,
+    marginTop: Spacing.sm,
+  },
+  exerciseMuscles: {
     color: palette.gray400,
     fontSize: Typography.size.xs,
-    fontWeight: Typography.weight.semibold,
-    marginBottom: 4,
+    marginTop: 2,
+    textAlign: 'center',
   },
-  hudValue: {
+
+  setsCard: { marginBottom: Spacing.xl, padding: Spacing.base },
+  setHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
+  setHeaderText: {
+    color: palette.gray400,
+    fontSize: Typography.size.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  setRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
+  setNumber: { color: palette.gray400, width: 34, fontSize: Typography.size.md },
+  setInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: BorderRadius.sm,
+    color: palette.white,
+    fontSize: Typography.size.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    textAlign: 'center',
+  },
+  removeBtn: { width: 30, alignItems: 'center' },
+  addSetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  addSetText: { color: palette.emerald, fontSize: Typography.size.sm, fontWeight: Typography.weight.medium },
+
+  durationCard: { marginBottom: Spacing.xl, padding: Spacing.base },
+  durationRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  durationInput: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: BorderRadius.sm,
+    color: palette.white,
+    fontSize: Typography.size.lg,
+    fontWeight: Typography.weight.bold,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    textAlign: 'center',
+    minWidth: 80,
+  },
+  durationUnit: { color: palette.gray300, fontSize: Typography.size.md },
+  durationHint: {
+    color: palette.gray400,
+    fontSize: Typography.size.xs,
+    lineHeight: 17,
+    marginTop: Spacing.sm,
+  },
+
+  summaryCard: { marginBottom: Spacing.lg },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  summaryItem: { alignItems: 'center', flex: 1 },
+  summaryValue: {
     color: palette.white,
     fontSize: Typography.size['2xl'],
     fontWeight: Typography.weight.bold,
   },
+  summaryLabel: { color: palette.gray400, fontSize: Typography.size.xs, marginTop: 2 },
+  summaryDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.06)' },
 
-  controls: {
-    marginBottom: Spacing['4xl'],
-  },
-  mainBtn: { borderRadius: BorderRadius.lg, overflow: 'hidden' },
-  btnGradient: {
+  saveBtn: { borderRadius: BorderRadius.lg, overflow: 'hidden', marginBottom: Spacing.lg },
+  saveGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.lg,
     gap: Spacing.sm,
+    paddingVertical: Spacing.base,
   },
-  btnText: {
+  saveText: {
     color: palette.white,
     fontSize: Typography.size.lg,
     fontWeight: Typography.weight.bold,
+  },
+
+  savedCard: { padding: Spacing.lg },
+  savedTitle: {
+    color: palette.white,
+    fontSize: Typography.size.base,
+    fontWeight: Typography.weight.bold,
+    flex: 1,
   },
 });
