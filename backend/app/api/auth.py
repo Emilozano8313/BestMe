@@ -7,6 +7,7 @@ Endpoints for registration, login, and token management.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,7 +26,7 @@ from app.core.security import (
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import RefreshRequest, Token
-from app.schemas.user import UserCreate, UserResponse
+from app.schemas.user import UserCreate, UserResponse, UserUpdate
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -165,4 +166,37 @@ async def get_me(
     """
     Get current user profile based on provided JWT.
     """
+    return current_user
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    changes: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Update the current user's profile.
+
+    Only the fields present in the request body are modified, so the client
+    can send a single changed value (a new weight, say) without having to
+    round-trip the whole profile. Weight, activity level, and goal all feed
+    the metabolic engine, so the next call to /metrics/profile reflects them.
+    """
+    updates = changes.model_dump(exclude_unset=True)
+
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se enviaron campos para actualizar.",
+        )
+
+    for field, value in updates.items():
+        setattr(current_user, field, value)
+
+    current_user.updated_at = datetime.now(timezone.utc)
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+
     return current_user

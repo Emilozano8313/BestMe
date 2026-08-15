@@ -5,7 +5,7 @@ Endpoints for saving biomechanical training sessions and calculating
 bioenergetic expenditure using MET values.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends
@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.api.auth import get_current_user
+from app.core.security import get_current_user
 from app.models.user import User
 from app.models.workout_session import WorkoutSession
 from app.models.daily_metric import DailyMetric
@@ -67,7 +67,13 @@ async def create_workout_session(
 
     # 3. Save WorkoutSession
     ended_at = datetime.now(timezone.utc)
-    started_at = ended_at # In a real scenario, we'd accept started_at from the frontend
+    # Prefer the client's timestamp; otherwise reconstruct the start from the
+    # duration, so a session never lands in the DB with zero elapsed time.
+    started_at = workout_in.started_at or (
+        ended_at - timedelta(seconds=workout_in.duration_seconds)
+    )
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
 
     new_session = WorkoutSession(
         user_id=current_user.id,

@@ -16,10 +16,10 @@ from sqlalchemy import (
     Integer,
     String,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import JSONColumn, UUIDColumn
 
 
 class WorkoutSession(Base):
@@ -27,14 +27,14 @@ class WorkoutSession(Base):
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         primary_key=True,
         default=uuid.uuid4,
     )
 
     # Foreign key
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -50,7 +50,7 @@ class WorkoutSession(Base):
     # Per-set data stored as JSONB array
     # Format: [{"set_number": 1, "reps": 12, "weight_kg": 60.0, "form_score": 0.87, "issues": ["knee_valgus"]}]
     sets: Mapped[dict | None] = mapped_column(
-        JSONB,
+        JSONColumn,
         nullable=True,
         default=list,
     )
@@ -87,7 +87,7 @@ class WorkoutSession(Base):
     # Biomechanical analysis summary from MediaPipe
     # e.g. {"common_issues": ["incomplete_rom"], "best_set": 2, "symmetry_score": 0.94}
     analysis_summary: Mapped[dict | None] = mapped_column(
-        JSONB,
+        JSONColumn,
         nullable=True,
         default=dict,
     )

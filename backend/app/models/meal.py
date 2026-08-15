@@ -18,10 +18,10 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import JSONColumn, UUIDColumn, enum_values
 
 
 class MealType(str, enum.Enum):
@@ -36,14 +36,14 @@ class Meal(Base):
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         primary_key=True,
         default=uuid.uuid4,
     )
 
     # Foreign key
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -51,7 +51,7 @@ class Meal(Base):
 
     # Meal info
     meal_type: Mapped[MealType] = mapped_column(
-        Enum(MealType, name="meal_type_enum"),
+        Enum(MealType, name="meal_type_enum", values_callable=enum_values),
         nullable=False,
     )
     description: Mapped[str | None] = mapped_column(
@@ -68,7 +68,7 @@ class Meal(Base):
     # AI-detected foods — stored as JSONB for flexible schema
     # Format: [{"name": "chicken", "portion_g": 150, "confidence": 0.92, ...}]
     detected_foods: Mapped[dict | None] = mapped_column(
-        JSONB,
+        JSONColumn,
         nullable=True,
         default=list,
     )

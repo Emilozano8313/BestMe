@@ -86,6 +86,43 @@ def _build_metabolic_response(user: User) -> MetabolicProfileResponse:
     )
 
 
+async def _upsert_today_snapshot(
+    db: AsyncSession,
+    user: User,
+    profile: MetabolicProfileResponse,
+    weight_kg: float | None,
+) -> DailyMetric:
+    """
+    Write today's metabolic targets into `daily_metrics` (upsert).
+
+    Only touches the target_* columns — the consumed macros
+    (protein_g / carbs_g / fat_g) belong to the meals log.
+    """
+    today = date.today()
+    result = await db.execute(
+        select(DailyMetric).where(
+            DailyMetric.user_id == user.id,
+            DailyMetric.date == today,
+        )
+    )
+    metric = result.scalar_one_or_none()
+
+    if metric is None:
+        metric = DailyMetric(user_id=user.id, date=today)
+
+    metric.bmr = profile.bmr
+    metric.tdee = profile.tdee
+    metric.calorie_target = profile.calorie_target
+    metric.target_protein_g = profile.macros.protein_g
+    metric.target_carbs_g = profile.macros.carbs_g
+    metric.target_fat_g = profile.macros.fat_g
+    metric.weight_kg = weight_kg
+    metric.updated_at = datetime.now(timezone.utc)
+
+    db.add(metric)
+    return metric
+
+
 # ── Endpoints ────────────────────────────────────────────────────
 
 @router.get("/today_summary")
@@ -94,8 +131,11 @@ async def get_today_summary(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
-    Returns today's aggregate metrics (calories_consumed, calories_burned, workout_minutes).
-    Used by the Home Dashboard.
+    Returns today's aggregate metrics: what was consumed, what was burned,
+    and the targets the metabolic engine set.
+
+    Used by the Home Dashboard and the Nutrition screen so neither has to
+    re-sum the meals list client-side.
     """
     today = date.today()
     result = await db.execute(
@@ -105,18 +145,32 @@ async def get_today_summary(
         )
     )
     metric = result.scalar_one_or_none()
-    
+
     if not metric:
         return {
-            "calories_consumed": 0,
-            "calories_burned": 0,
-            "workout_minutes": 0,
+            "calories_consumed": 0.0,
+            "calories_burned": 0.0,
+            "workout_minutes": 0.0,
+            "protein_g": 0.0,
+            "carbs_g": 0.0,
+            "fat_g": 0.0,
+            "calorie_target": None,
+            "target_protein_g": None,
+            "target_carbs_g": None,
+            "target_fat_g": None,
         }
-        
+
     return {
         "calories_consumed": metric.calories_consumed,
         "calories_burned": metric.calories_burned,
         "workout_minutes": metric.workout_minutes,
+        "protein_g": metric.protein_g,
+        "carbs_g": metric.carbs_g,
+        "fat_g": metric.fat_g,
+        "calorie_target": metric.calorie_target,
+        "target_protein_g": metric.target_protein_g,
+        "target_carbs_g": metric.target_carbs_g,
+        "target_fat_g": metric.target_fat_g,
     }
 
 
@@ -172,28 +226,7 @@ async def complete_onboarding(
     profile = _build_metabolic_response(current_user)
 
     # 3. Upsert today's daily_metrics snapshot
-    today = date.today()
-    result = await db.execute(
-        select(DailyMetric).where(
-            DailyMetric.user_id == current_user.id,
-            DailyMetric.date == today,
-        )
-    )
-    metric = result.scalar_one_or_none()
-
-    if metric is None:
-        metric = DailyMetric(
-            user_id=current_user.id,
-            date=today,
-        )
-
-    metric.bmr = profile.bmr
-    metric.tdee = profile.tdee
-    metric.calorie_target = profile.calorie_target
-    metric.weight_kg = data.weight_kg
-    metric.updated_at = datetime.now(timezone.utc)
-
-    db.add(metric)
+    await _upsert_today_snapshot(db, current_user, profile, data.weight_kg)
     await db.commit()
 
     return OnboardingResponse(metabolic_profile=profile)
@@ -215,33 +248,11 @@ async def save_daily_snapshot(
 
     profile = _build_metabolic_response(current_user)
 
-    # Upsert
-    today = date.today()
-    result = await db.execute(
-        select(DailyMetric).where(
-            DailyMetric.user_id == current_user.id,
-            DailyMetric.date == today,
-        )
-    )
-    metric = result.scalar_one_or_none()
-
-    if metric is None:
-        metric = DailyMetric(
-            user_id=current_user.id,
-            date=today,
-        )
-
-    metric.bmr = profile.bmr
-    metric.tdee = profile.tdee
-    metric.calorie_target = profile.calorie_target
-    metric.weight_kg = current_user.weight_kg
-    metric.updated_at = datetime.now(timezone.utc)
-
-    db.add(metric)
+    await _upsert_today_snapshot(db, current_user, profile, current_user.weight_kg)
     await db.commit()
 
     return SnapshotResponse(
-        date=today,
+        date=date.today(),
         bmr=profile.bmr,
         tdee=profile.tdee,
         calorie_target=profile.calorie_target,

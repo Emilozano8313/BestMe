@@ -5,22 +5,25 @@ Endpoints for AI visual analysis and saving validated meals.
 Updates daily metrics progressively.
 """
 
-import base64
+import logging
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.core.security import get_current_user
+from app.core.uploads import read_image_upload
 from app.models.user import User
 from app.models.meal import Meal
 from app.models.daily_metric import DailyMetric
 from app.schemas.meal import AnalyzeResponse, MealCreate, MealResponse, MealUpdate, DetectedFood
-from app.services.vision import VisionService
+from app.services.vision import VisionError, VisionService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meals", tags=["meals"])
 
@@ -31,20 +34,32 @@ async def analyze_meal_image(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Receives an image, converts to base64, and sends to OpenAI Vision API
-    for nutritional estimation.
+    Estimate the nutritional content of a meal photo.
+
+    Nothing is persisted here — the user reviews and corrects the estimate
+    on the validation screen before it becomes a meal.
     """
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
+    base64_image, media_type = await read_image_upload(file)
 
     try:
-        contents = await file.read()
-        base64_image = base64.b64encode(contents).decode("utf-8")
-        detected_foods = await VisionService.analyze_meal_image(base64_image)
-        return AnalyzeResponse(foods=[DetectedFood(**f) for f in detected_foods])
+        detected_foods = await VisionService.analyze_meal_image(base64_image, media_type)
+    except VisionError as exc:
+        # Message is already user-facing and free of internals.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except Exception:
+        logger.exception("Unexpected failure analysing meal image")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo analizar la imagen.",
+        )
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return AnalyzeResponse(
+        foods=[DetectedFood(**food) for food in detected_foods],
+        is_mock=not VisionService.is_configured(),
+    )
 
 
 @router.post("/", response_model=MealResponse, status_code=201)
@@ -177,6 +192,8 @@ async def update_meal(
     meal.manually_adjusted = True
     if meal_in.description is not None:
         meal.description = meal_in.description
+    if meal_in.meal_type is not None:
+        meal.meal_type = meal_in.meal_type
 
     # Apply delta to DailyMetric
     today  = meal.logged_at.date()

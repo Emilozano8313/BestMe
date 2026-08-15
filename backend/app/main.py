@@ -31,10 +31,14 @@ async def lifespan(app: FastAPI):
     Startup: Log application info, verify connections.
     Shutdown: Clean up resources gracefully.
     """
+    # Refuses to boot on unsafe production settings (default JWT secret,
+    # wildcard CORS, SQL echo) rather than serving them silently.
+    settings.validate_for_production()
+
     print(f"🚀 {settings.app_name} v{settings.app_version} starting...")
     print(f"   Environment: {settings.environment}")
     print(f"   Database: {settings.database_url.split('@')[-1] if '@' in settings.database_url else 'configured'}")
-    print(f"   OpenAI Key: {'✅ configured' if settings.openai_api_key else '⚠️  not set (mock mode)'}")
+    print(f"   Claude API: {'✅ configurada' if settings.anthropic_api_key else '⚠️  sin clave — los análisis devuelven datos de ejemplo'}")
 
     yield
 
@@ -59,7 +63,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    # A wildcard origin and credentials are mutually exclusive per the CORS
+    # spec; browsers reject the pair. See Settings.allow_credentials.
+    allow_credentials=settings.allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -16,10 +16,10 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import UUIDColumn
 
 
 class DailyMetric(Base):
@@ -32,14 +32,14 @@ class DailyMetric(Base):
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         primary_key=True,
         default=uuid.uuid4,
     )
 
     # Foreign key
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -69,7 +69,26 @@ class DailyMetric(Base):
         comment="Daily calorie target based on goal",
     )
 
-    # Nutrition aggregates (summed from meals)
+    # Macro *targets* computed by the metabolic engine.
+    # Kept separate from the consumed totals below: writing both into the
+    # same columns made a body scan wipe out the day's food log.
+    target_protein_g: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Daily protein target (g)",
+    )
+    target_carbs_g: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Daily carbohydrate target (g)",
+    )
+    target_fat_g: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Daily fat target (g)",
+    )
+
+    # Nutrition aggregates *consumed* (summed from meals)
     calories_consumed: Mapped[float] = mapped_column(
         Float,
         default=0.0,

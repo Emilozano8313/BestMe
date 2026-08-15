@@ -3,15 +3,24 @@
  * =======================
  * Global state for authentication (JWT), login, registration,
  * and onboarding flow management.
+ *
+ * Tokens are persisted in the device keychain (expo-secure-store), so
+ * closing the app no longer logs the user out.
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useRouter, useSegments } from 'expo-router';
-import api from '../services/api';
+import * as SecureStore from 'expo-secure-store';
+import api, { type AuthTokens } from '../services/api';
+
+// ── Storage keys ──────────────────────────────────────────────────
+
+const ACCESS_TOKEN_KEY = 'bestme.accessToken';
+const REFRESH_TOKEN_KEY = 'bestme.refreshToken';
 
 // ── Types ─────────────────────────────────────────────────────────
 
-interface User {
+export interface User {
   id: string;
   email: string;
   full_name: string;
@@ -28,7 +37,7 @@ interface User {
   updated_at: string;
 }
 
-interface MetabolicProfile {
+export interface MetabolicProfile {
   bmr: number;
   equation_used: string;
   lean_mass_kg: number | null;
@@ -58,18 +67,48 @@ interface OnboardingData {
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
   isLoading: boolean;
   needsOnboarding: boolean;
   metabolicProfile: MetabolicProfile | null;
   login: (email: string, password: string) => Promise<void>;
   register: (data: any) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   completeOnboarding: (data: OnboardingData) => Promise<void>;
   refreshMetabolicProfile: () => Promise<void>;
+  updateProfile: (changes: Partial<User>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
+
+// ── Token persistence ─────────────────────────────────────────────
+
+async function persistTokens(tokens: AuthTokens | null): Promise<void> {
+  try {
+    if (!tokens) {
+      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      return;
+    }
+    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, tokens.accessToken);
+    if (tokens.refreshToken) {
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    }
+  } catch (error) {
+    // A keychain failure must not break the session that's already running.
+    console.warn('No se pudieron guardar los tokens:', error);
+  }
+}
+
+async function loadTokens(): Promise<AuthTokens | null> {
+  try {
+    const accessToken = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+    if (!accessToken) return null;
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    return { accessToken, refreshToken };
+  } catch {
+    return null;
+  }
+}
 
 // ── Helper: check if onboarding is needed ─────────────────────────
 
@@ -88,7 +127,6 @@ function checkNeedsOnboarding(user: User | null): boolean {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [metabolicProfile, setMetabolicProfile] = useState<MetabolicProfile | null>(null);
 
@@ -97,136 +135,170 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const needsOnboarding = checkNeedsOnboarding(user);
 
-  useEffect(() => {
-    // In a real app, we would load the token from SecureStore here.
-    // For now, we simulate a loaded state with no user.
-    setTimeout(() => {
-      setIsLoading(false);
-    }, 500);
+  // Keeps the latest signOut available to the api client without
+  // re-registering the callback on every render.
+  const signOutRef = useRef<() => void>(() => {});
+
+  const clearSession = useCallback(async () => {
+    setUser(null);
+    setMetabolicProfile(null);
+    api.setTokens(null);
+    await persistTokens(null);
   }, []);
 
+  signOutRef.current = () => {
+    void clearSession();
+  };
+
+  // Wire the api client to this context: it persists refreshed tokens
+  // and signs the user out when the refresh token is dead too.
+  useEffect(() => {
+    api.setCallbacks({
+      onTokensChanged: (tokens) => {
+        void persistTokens(tokens);
+      },
+      onAuthFailure: () => signOutRef.current(),
+    });
+  }, []);
+
+  const loadMetabolicProfile = useCallback(async () => {
+    const res = await api.get<MetabolicProfile>('/metrics/profile');
+    if (res.data && res.status === 200) {
+      setMetabolicProfile(res.data);
+    }
+  }, []);
+
+  const loadCurrentUser = useCallback(async (): Promise<User | null> => {
+    const res = await api.get<User>('/auth/me');
+    if (res.error || !res.data) return null;
+    setUser(res.data);
+    if (!checkNeedsOnboarding(res.data)) {
+      await loadMetabolicProfile();
+    }
+    return res.data;
+  }, [loadMetabolicProfile]);
+
+  // ── Restore session on cold start ───────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const tokens = await loadTokens();
+      if (tokens) {
+        api.setTokens(tokens);
+        const restored = await loadCurrentUser();
+        if (!restored && !cancelled) {
+          // Both tokens are dead — start clean.
+          await clearSession();
+        }
+      }
+      if (!cancelled) setIsLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCurrentUser, clearSession]);
+
+  // ── Route guarding ──────────────────────────────────────────────
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
-    const inOnboardingGroup = segments[0] === '(onboarding)';
+    const group = segments[0] as string | undefined;
+    const inAuthGroup = group === '(auth)';
+    const inOnboardingGroup = group === '(onboarding)';
 
     if (!user && !inAuthGroup) {
-      // Redirect to login if not authenticated
-      router.replace('/(auth)/login');
+      router.replace('/(auth)/login' as never);
     } else if (user && needsOnboarding && !inOnboardingGroup) {
-      // Redirect to onboarding if authenticated but profile incomplete
-      router.replace('/(onboarding)/step-basics');
+      router.replace('/(onboarding)/step-basics' as never);
     } else if (user && !needsOnboarding && (inAuthGroup || inOnboardingGroup)) {
-      // Redirect to home if fully set up
-      router.replace('/(tabs)/');
+      router.replace('/(tabs)' as never);
     }
-  }, [user, segments, isLoading, needsOnboarding]);
+  }, [user, segments, isLoading, needsOnboarding, router]);
 
-  const login = async (email: string, password: string) => {
-    try {
-      // Encode as URLSearchParams because OAuth2PasswordRequestForm expects form data
-      const formData = new URLSearchParams();
-      formData.append('username', email);
-      formData.append('password', password);
+  // ── Actions ─────────────────────────────────────────────────────
 
-      const res = await fetch('http://localhost:8000/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: formData.toString(),
-      });
-      
-      if (!res.ok) {
-        throw new Error('Login fallido');
+  const login = useCallback(
+    async (email: string, password: string) => {
+      // The backend uses OAuth2PasswordRequestForm, which needs form encoding.
+      const res = await api.postForm<{ access_token: string; refresh_token: string }>(
+        '/auth/login',
+        { username: email, password },
+      );
+
+      if (res.error || !res.data) {
+        throw new Error(res.error ?? 'No se pudo iniciar sesión');
       }
-      
-      const data = await res.json();
-      setToken(data.access_token);
-      api.setToken(data.access_token);
-      
-      // Fetch user profile
-      const userRes = await api.get<User>('/auth/me');
-      if (userRes.data) {
-        setUser(userRes.data);
 
-        // If profile is complete, load metabolic data
-        if (!checkNeedsOnboarding(userRes.data)) {
-          await loadMetabolicProfile();
-        }
+      const tokens: AuthTokens = {
+        accessToken: res.data.access_token,
+        refreshToken: res.data.refresh_token,
+      };
+      api.setTokens(tokens);
+      await persistTokens(tokens);
+
+      const loaded = await loadCurrentUser();
+      if (!loaded) {
+        await clearSession();
+        throw new Error('No se pudo cargar tu perfil');
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      throw error;
-    }
-  };
+    },
+    [loadCurrentUser, clearSession],
+  );
 
-  const register = async (userData: any) => {
-    const res = await api.post<User>('/auth/register', userData);
-    if (res.error) {
-      throw new Error(res.error);
-    }
-    // After register, auto-login
-    await login(userData.email, userData.password);
-  };
+  const register = useCallback(
+    async (userData: any) => {
+      const res = await api.post<User>('/auth/register', userData);
+      if (res.error) throw new Error(res.error);
+      await login(userData.email, userData.password);
+    },
+    [login],
+  );
 
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    setMetabolicProfile(null);
-    api.setToken(null);
-    // SecureStore.deleteItemAsync('token');
-  };
+  const logout = useCallback(async () => {
+    await clearSession();
+  }, [clearSession]);
 
-  const loadMetabolicProfile = async () => {
-    try {
-      const res = await api.get<MetabolicProfile>('/metrics/profile');
-      if (res.data && res.status === 200) {
-        setMetabolicProfile(res.data);
+  const completeOnboarding = useCallback(
+    async (data: OnboardingData) => {
+      const res = await api.post<{ message: string; metabolic_profile: MetabolicProfile }>(
+        '/metrics/onboarding',
+        data,
+      );
+
+      if (res.error || !res.data) {
+        throw new Error(res.error ?? 'Error al completar el onboarding');
       }
-    } catch (error) {
-      console.error('Failed to load metabolic profile:', error);
-    }
-  };
 
-  const completeOnboarding = async (data: OnboardingData) => {
-    const res = await api.post<{ message: string; metabolic_profile: MetabolicProfile }>(
-      '/metrics/onboarding',
-      data,
-    );
+      setMetabolicProfile(res.data.metabolic_profile);
+      // Re-read the user so `needsOnboarding` reflects what the server stored.
+      await loadCurrentUser();
+    },
+    [loadCurrentUser],
+  );
 
-    if (res.error || !res.data) {
-      throw new Error(res.error || 'Error al completar el onboarding');
-    }
+  const updateProfile = useCallback(
+    async (changes: Partial<User>) => {
+      const res = await api.patch<User>('/auth/me', changes);
+      if (res.error || !res.data) {
+        throw new Error(res.error ?? 'No se pudo actualizar tu perfil');
+      }
+      setUser(res.data);
+      // Weight/goal/activity all feed the metabolic engine.
+      await loadMetabolicProfile();
+    },
+    [loadMetabolicProfile],
+  );
 
-    // Update user locally with onboarding data
-    if (user) {
-      setUser({
-        ...user,
-        date_of_birth: data.date_of_birth,
-        gender: data.gender,
-        height_cm: data.height_cm,
-        weight_kg: data.weight_kg,
-        body_fat_percentage: data.body_fat_percentage,
-        activity_level: data.activity_level,
-        goal: data.goal,
-      });
-    }
-
-    // Store the metabolic profile
-    setMetabolicProfile(res.data.metabolic_profile);
-  };
-
-  const refreshMetabolicProfile = async () => {
+  const refreshMetabolicProfile = useCallback(async () => {
     await loadMetabolicProfile();
-  };
+  }, [loadMetabolicProfile]);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
         isLoading,
         needsOnboarding,
         metabolicProfile,
@@ -235,6 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         completeOnboarding,
         refreshMetabolicProfile,
+        updateProfile,
       }}
     >
       {children}

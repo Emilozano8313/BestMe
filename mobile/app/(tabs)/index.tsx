@@ -5,7 +5,7 @@
  * and quick actions. Fetches real metabolic data from the API.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   StyleSheet,
   ScrollView,
@@ -13,9 +13,11 @@ import {
   Text,
   StatusBar,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -23,6 +25,27 @@ import { ProgressRing } from '@/components/ui/ProgressRing';
 import { MacroBar } from '@/components/ui/MacroBar';
 import { QuickAction } from '@/components/ui/QuickAction';
 import { useAuth } from '@/context/AuthContext';
+import api from '@/services/api';
+
+// ── Today's aggregates, as returned by GET /metrics/today_summary ──
+
+interface DailySummary {
+  calories_consumed: number;
+  calories_burned: number;
+  workout_minutes: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+const EMPTY_SUMMARY: DailySummary = {
+  calories_consumed: 0,
+  calories_burned: 0,
+  workout_minutes: 0,
+  protein_g: 0,
+  carbs_g: 0,
+  fat_g: 0,
+};
 
 // ── Goal Label Map ───────────────────────────────────────────────
 
@@ -39,44 +62,50 @@ const GOAL_ICONS: Record<string, string> = {
 };
 
 export default function HomeScreen() {
+  const router = useRouter();
   const { user, metabolicProfile, refreshMetabolicProfile } = useAuth();
   const [isLoading, setIsLoading] = useState(!metabolicProfile);
-  const [meals, setMeals] = useState<any[]>([]);
-  const [dailySummary, setDailySummary] = useState({
-    calories_consumed: 0,
-    calories_burned: 0,
-    workout_minutes: 0,
-  });
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [mealCount, setMealCount] = useState(0);
+  const [dailySummary, setDailySummary] = useState<DailySummary>(EMPTY_SUMMARY);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const loadData = useCallback(async () => {
+    setLoadError(null);
+    const [summaryRes, mealsRes] = await Promise.all([
+      api.get<DailySummary>('/metrics/today_summary'),
+      api.get<unknown[]>('/meals/today'),
+    ]);
 
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      await refreshMetabolicProfile();
-      // Fetch today's meals to calculate consumed macros
-      const mealsRes = await fetch('http://localhost:8000/api/meals/today', {
-        headers: { Authorization: `Bearer ${api.token}` }
-      });
-      if (mealsRes.ok) {
-        setMeals(await mealsRes.json());
-      }
+    if (summaryRes.data) setDailySummary({ ...EMPTY_SUMMARY, ...summaryRes.data });
+    if (mealsRes.data) setMealCount(mealsRes.data.length);
 
-      // Fetch today's summary (calories burned, minutes)
-      const summaryRes = await fetch('http://localhost:8000/api/metrics/today_summary', {
-        headers: { Authorization: `Bearer ${api.token}` }
-      });
-      if (summaryRes.ok) {
-        setDailySummary(await summaryRes.json());
-      }
-    } catch (e) {
-      console.error('Failed to load data:', e);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    const failure = summaryRes.error ?? mealsRes.error;
+    if (failure) setLoadError(failure);
+
+    await refreshMetabolicProfile();
+  }, [refreshMetabolicProfile]);
+
+  // Re-reads on every focus, so logging a meal or a workout is reflected
+  // as soon as the user comes back to the dashboard.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        await loadData();
+        if (active) setIsLoading(false);
+      })();
+      return () => {
+        active = false;
+      };
+    }, [loadData]),
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await loadData();
+    setIsRefreshing(false);
+  }, [loadData]);
 
   // ── Loading State ─────────────────────────────────────────────
 
@@ -99,10 +128,10 @@ export default function HomeScreen() {
   const goalLabel = GOAL_LABELS[profile.goal] || profile.goal;
   const goalIcon = GOAL_ICONS[profile.goal] || 'flag';
 
-  const caloriesConsumed = meals.reduce((sum, m) => sum + m.total_calories, 0);
-  const proteinConsumed = meals.reduce((sum, m) => sum + m.total_protein_g, 0);
-  const carbsConsumed = meals.reduce((sum, m) => sum + m.total_carbs_g, 0);
-  const fatConsumed = meals.reduce((sum, m) => sum + m.total_fat_g, 0);
+  const caloriesConsumed = Math.round(dailySummary.calories_consumed);
+  const proteinConsumed = Math.round(dailySummary.protein_g);
+  const carbsConsumed = Math.round(dailySummary.carbs_g);
+  const fatConsumed = Math.round(dailySummary.fat_g);
 
   const caloriesTarget = Math.round(profile.calorie_target);
   const caloriesRemaining = Math.max(0, caloriesTarget - caloriesConsumed);
@@ -119,7 +148,22 @@ export default function HomeScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={palette.emerald}
+            colors={[palette.emerald]}
+          />
+        }
       >
+        {loadError ? (
+          <View style={styles.errorBanner}>
+            <Ionicons name="cloud-offline-outline" size={16} color={palette.coral} />
+            <Text style={styles.errorBannerText}>{loadError}</Text>
+          </View>
+        ) : null}
+
         {/* ── Header ─────────────────────────────────── */}
         <View style={styles.header}>
           <View>
@@ -175,19 +219,19 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>Macronutrientes</Text>
           <MacroBar
             label="Proteína"
-            current={Math.round(proteinConsumed)}
+            current={proteinConsumed}
             target={Math.round(profile.macros.protein_g)}
             color={palette.protein}
           />
           <MacroBar
             label="Carbohidratos"
-            current={Math.round(carbsConsumed)}
+            current={carbsConsumed}
             target={Math.round(profile.macros.carbs_g)}
             color={palette.carbs}
           />
           <MacroBar
             label="Grasas"
-            current={Math.round(fatConsumed)}
+            current={fatConsumed}
             target={Math.round(profile.macros.fat_g)}
             color={palette.fat}
           />
@@ -200,21 +244,25 @@ export default function HomeScreen() {
             icon="camera-outline"
             label="Escanear Comida"
             gradient={[palette.emerald, palette.cyan]}
+            onPress={() => router.push('/(tabs)/nutrition' as never)}
           />
           <QuickAction
             icon="barbell-outline"
             label="Entrenar"
             gradient={[palette.violet, palette.violetLight]}
+            onPress={() => router.push('/(tabs)/train' as never)}
           />
           <QuickAction
             icon="body-outline"
             label="Body Scan"
             gradient={[palette.coral, palette.amber]}
+            onPress={() => router.push('/(tabs)/scanner' as never)}
           />
           <QuickAction
             icon="analytics-outline"
             label="Métricas"
             gradient={[palette.cyan, palette.cyanLight]}
+            onPress={() => router.push('/(tabs)/profile' as never)}
           />
         </View>
 
@@ -233,7 +281,7 @@ export default function HomeScreen() {
               >
                 <Ionicons name="restaurant-outline" size={20} color={palette.emerald} />
               </LinearGradient>
-              <Text style={styles.activityValue}>{meals.length}</Text>
+              <Text style={styles.activityValue}>{mealCount}</Text>
               <Text style={styles.activityLabel}>Comidas</Text>
             </View>
 
@@ -300,6 +348,22 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing['2xl'],
+  },
+
+  // Offline / error banner
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 107, 107, 0.10)',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.base,
+  },
+  errorBannerText: {
+    color: palette.coral,
+    fontSize: Typography.size.sm,
+    flex: 1,
   },
 
   // Skeleton loading

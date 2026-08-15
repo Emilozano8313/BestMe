@@ -15,10 +15,10 @@ from sqlalchemy import (
     ForeignKey,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import JSONColumn, UUIDColumn
 
 
 class BodyScan(Base):
@@ -26,14 +26,14 @@ class BodyScan(Base):
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         primary_key=True,
         default=uuid.uuid4,
     )
 
     # Foreign key
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -59,7 +59,7 @@ class BodyScan(Base):
     # Additional analysis metadata
     # e.g. {"waist_hip_ratio": 0.85, "shoulder_waist_ratio": 1.4, "category": "athletic"}
     scan_metadata: Mapped[dict | None] = mapped_column(
-        JSONB,
+        JSONColumn,
         nullable=True,
         default=dict,
     )

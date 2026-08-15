@@ -14,14 +14,21 @@ from app.config import get_settings
 settings = get_settings()
 
 # ── Async Engine ─────────────────────────────────────────────────
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
-    future=True,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-)
+# Connection pooling options are PostgreSQL-specific: SQLite uses a
+# StaticPool that rejects them outright. Keeping them conditional lets the
+# test suite run against an in-memory SQLite database.
+_engine_options: dict = {
+    "echo": settings.debug,
+    "future": True,
+}
+if not settings.database_url.startswith("sqlite"):
+    _engine_options.update(
+        pool_size=20,
+        max_overflow=10,
+        pool_pre_ping=True,
+    )
+
+engine = create_async_engine(settings.database_url, **_engine_options)
 
 # ── Session Factory ──────────────────────────────────────────────
 async_session = async_sessionmaker(

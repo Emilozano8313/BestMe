@@ -19,10 +19,10 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import UUIDColumn, enum_values
 
 
 # ── Enums ─────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ class User(Base):
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        UUIDColumn,
         primary_key=True,
         default=uuid.uuid4,
     )
@@ -85,7 +85,7 @@ class User(Base):
         nullable=True,
     )
     gender: Mapped[Gender | None] = mapped_column(
-        Enum(Gender, name="gender_enum"),
+        Enum(Gender, name="gender_enum", values_callable=enum_values),
         nullable=True,
     )
     height_cm: Mapped[float | None] = mapped_column(
@@ -103,12 +103,12 @@ class User(Base):
 
     # Fitness Configuration
     activity_level: Mapped[ActivityLevel | None] = mapped_column(
-        Enum(ActivityLevel, name="activity_level_enum"),
+        Enum(ActivityLevel, name="activity_level_enum", values_callable=enum_values),
         nullable=True,
         default=ActivityLevel.MODERATE,
     )
     goal: Mapped[FitnessGoal | None] = mapped_column(
-        Enum(FitnessGoal, name="fitness_goal_enum"),
+        Enum(FitnessGoal, name="fitness_goal_enum", values_callable=enum_values),
         nullable=True,
         default=FitnessGoal.MAINTAIN,
     )
