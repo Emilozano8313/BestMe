@@ -1,0 +1,1 @@
+"""BestMe — Pydantic Schemas Package"""

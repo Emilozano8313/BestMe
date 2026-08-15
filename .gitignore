@@ -1,0 +1,54 @@
+# ── Python ────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# ── Environment ──────────────────
+.env
+.env.local
+.env.production
+
+# ── IDE ──────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Docker ───────────────────────
+# Do NOT ignore docker-compose.yml
+
+# ── Node / React Native ─────────
+node_modules/
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+.cache/
+
+# ── Mobile Builds ────────────────
+android/app/build/
+ios/Pods/
+*.apk
+*.aab
+*.ipa
+
+# ── Testing ──────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+coverage/
+
+# ── Uploads (development) ───────
+uploads/
+*.log

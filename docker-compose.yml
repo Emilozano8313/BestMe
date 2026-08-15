@@ -1,0 +1,65 @@
+# ============================================
+# BestMe — Docker Compose (Development)
+# ============================================
+# Usage:
+#   docker compose up --build        (start all services)
+#   docker compose down -v           (stop and remove volumes)
+#   docker compose logs -f api       (follow API logs)
+
+services:
+  # ── FastAPI Backend ──────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bestme-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bestme-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── PostgreSQL Database ────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: bestme-db
+    environment:
+      POSTGRES_USER: bestme_user
+      POSTGRES_PASSWORD: bestme_secret_2024
+      POSTGRES_DB: bestme_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - bestme_pgdata:/var/lib/postgresql/data
+    networks:
+      - bestme-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bestme_user -d bestme_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# ── Volumes ──────────────────────────────────────────────────────
+volumes:
+  bestme_pgdata:
+    driver: local
+
+# ── Networks ─────────────────────────────────────────────────────
+networks:
+  bestme-network:
+    driver: bridge
