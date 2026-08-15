@@ -10,11 +10,12 @@ from datetime import datetime, timezone
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query, status
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.core.ratelimit import AI_ENDPOINT_LIMIT, limiter
 from app.core.security import get_current_user
 from app.core.uploads import read_image_upload
 from app.models.user import User
@@ -29,7 +30,9 @@ router = APIRouter(prefix="/api/meals", tags=["meals"])
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
+@limiter.limit(AI_ENDPOINT_LIMIT)
 async def analyze_meal_image(
+    request: Request,  # required by slowapi
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):

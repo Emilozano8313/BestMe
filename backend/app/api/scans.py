@@ -9,15 +9,19 @@ calorie target for every day that follows — so `/analyze` only previews, and
 nothing is persisted until the user confirms via `/confirm`.
 """
 
-from __future__ import annotations
+# NOTE: no `from __future__ import annotations` here. It turns annotations
+# into strings, and FastAPI then cannot resolve `UploadFile` through
+# slowapi's decorator wrapper — the app fails to build its routes.
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ratelimit import AI_ENDPOINT_LIMIT, limiter
 from app.core.security import get_current_user
 from app.core.uploads import read_image_upload
 from app.database import get_db
@@ -56,7 +60,7 @@ def _require_complete_profile(user: User) -> None:
         )
 
 
-def _compute_profile(user: User, body_fat: float | None):
+def _compute_profile(user: User, body_fat: Optional[float]):
     """Run the metabolic engine for a given body fat percentage."""
     return MetabolicEngine.compute_full_profile(
         weight_kg=user.weight_kg,
@@ -70,7 +74,9 @@ def _compute_profile(user: User, body_fat: float | None):
 
 
 @router.post("/analyze", response_model=ScanPreviewResponse)
+@limiter.limit(AI_ENDPOINT_LIMIT)
 async def analyze_body_scan(
+    request: Request,  # required by slowapi
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):

@@ -1,1 +1,4 @@
 .venv/
+
+# Bases de datos locales de pruebas
+*.db

@@ -19,6 +19,9 @@ services:
       - ./backend:/app
     env_file:
       - ./backend/.env
+    # Development only: hot-reload on file changes. The image's own CMD runs
+    # gunicorn with worker supervision, which is what production uses.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:
         condition: service_healthy
