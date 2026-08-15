@@ -40,30 +40,42 @@ def upgrade() -> None:
         sa.Column("target_fat_g", sa.Float(), nullable=True, comment="Daily fat target (g)"),
     )
 
-    # Rows written by a body scan hold targets in the consumed columns.
-    # They are indistinguishable from real intake, so move them across and
-    # reset the consumed totals to zero — the meals for that day can be
-    # re-aggregated from the `meals` table, which was never corrupted.
+    # Repair days that a body scan corrupted.
+    #
+    # Only those days need fixing: onboarding never wrote macros at all, so a
+    # row is only suspect if a scan happened on its date — `body_scans` tells
+    # us exactly which. For each such row, move the values sitting in the
+    # consumed columns over to the targets (that is what they actually were),
+    # then rebuild the consumed totals from `meals`, which was never affected.
+    #
+    # Dates are compared in UTC to match how the API derives "today"
+    # (datetime.now(timezone.utc).date()).
     op.execute(
         """
         UPDATE daily_metrics AS dm
         SET target_protein_g = dm.protein_g,
             target_carbs_g   = dm.carbs_g,
             target_fat_g     = dm.fat_g,
-            protein_g        = COALESCE(m.protein, 0),
-            carbs_g          = COALESCE(m.carbs, 0),
-            fat_g            = COALESCE(m.fat, 0)
-        FROM (
-            SELECT user_id,
-                   DATE(logged_at) AS day,
-                   SUM(total_protein_g) AS protein,
-                   SUM(total_carbs_g)   AS carbs,
-                   SUM(total_fat_g)     AS fat
-            FROM meals
-            GROUP BY user_id, DATE(logged_at)
-        ) AS m
-        ON m.user_id = dm.user_id AND m.day = dm.date
-        WHERE dm.calorie_target IS NOT NULL
+            protein_g = COALESCE((
+                SELECT SUM(m.total_protein_g) FROM meals m
+                WHERE m.user_id = dm.user_id
+                  AND (m.logged_at AT TIME ZONE 'UTC')::date = dm.date
+            ), 0),
+            carbs_g = COALESCE((
+                SELECT SUM(m.total_carbs_g) FROM meals m
+                WHERE m.user_id = dm.user_id
+                  AND (m.logged_at AT TIME ZONE 'UTC')::date = dm.date
+            ), 0),
+            fat_g = COALESCE((
+                SELECT SUM(m.total_fat_g) FROM meals m
+                WHERE m.user_id = dm.user_id
+                  AND (m.logged_at AT TIME ZONE 'UTC')::date = dm.date
+            ), 0)
+        WHERE EXISTS (
+            SELECT 1 FROM body_scans bs
+            WHERE bs.user_id = dm.user_id
+              AND (bs.scanned_at AT TIME ZONE 'UTC')::date = dm.date
+        )
         """
     )
 

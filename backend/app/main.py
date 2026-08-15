@@ -6,6 +6,7 @@ Configures the FastAPI app, middleware, CORS, and router inclusion.
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -21,6 +22,12 @@ from app.api.scans import router as scans_router
 
 settings = get_settings()
 
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+)
+logger = logging.getLogger("bestme")
+
 
 # ── Lifespan ─────────────────────────────────────────────────────
 @asynccontextmanager
@@ -28,21 +35,36 @@ async def lifespan(app: FastAPI):
     """
     Application lifespan handler.
 
-    Startup: Log application info, verify connections.
-    Shutdown: Clean up resources gracefully.
+    Startup: validate configuration and log what the app is running with.
+    Shutdown: clean up resources gracefully.
+
+    Note: messages are plain ASCII on purpose. Emoji crash the Windows
+    console (cp1252) with UnicodeEncodeError, which took the whole server
+    down at startup outside Docker.
     """
     # Refuses to boot on unsafe production settings (default JWT secret,
     # wildcard CORS, SQL echo) rather than serving them silently.
     settings.validate_for_production()
 
-    print(f"🚀 {settings.app_name} v{settings.app_version} starting...")
-    print(f"   Environment: {settings.environment}")
-    print(f"   Database: {settings.database_url.split('@')[-1] if '@' in settings.database_url else 'configured'}")
-    print(f"   Claude API: {'✅ configurada' if settings.anthropic_api_key else '⚠️  sin clave — los análisis devuelven datos de ejemplo'}")
+    database = (
+        settings.database_url.split("@")[-1]
+        if "@" in settings.database_url
+        else settings.database_url.split("///")[-1] or "configured"
+    )
+
+    logger.info("%s v%s starting", settings.app_name, settings.app_version)
+    logger.info("  Environment: %s", settings.environment)
+    logger.info("  Database:    %s", database)
+    logger.info(
+        "  Claude API:  %s",
+        "configured"
+        if settings.anthropic_api_key
+        else "NOT SET - image analysis returns clearly-labelled sample data",
+    )
 
     yield
 
-    print(f"👋 {settings.app_name} shutting down...")
+    logger.info("%s shutting down", settings.app_name)
 
 
 # ── App Factory ──────────────────────────────────────────────────
