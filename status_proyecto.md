@@ -1,8 +1,8 @@
 # 📋 BestMe — Status del Proyecto
 
 > **Última actualización:** 2026-08-15
-> **Versión:** 0.4.0
-> **Estado:** Backend funcional y verificado · Frontend conectado a datos reales · Falta cámara real e IA con clave
+> **Versión:** 0.5.0
+> **Estado:** Backend funcional y verificado · Frontend conectado a datos reales · Rutinas gratuitas sin IA · Falta cámara real e IA con clave
 
 ---
 
@@ -10,9 +10,10 @@
 
 | Componente | Estado | Notas |
 |------------|--------|-------|
-| Backend (FastAPI) | ✅ Funcional | 19 endpoints, arranca en Windows y en Docker |
+| Backend (FastAPI) | ✅ Funcional | 20 endpoints, arranca en Windows y en Docker |
 | Base de Datos (PostgreSQL) | ✅ 2 migraciones | Tipos portables: los tests corren en SQLite |
 | Autenticación | ✅ Funcional | JWT + refresh automático, sesión persistente |
+| Rutinas de entrenamiento (`WorkoutPlanner`) | ✅ Funcional, gratis | Motor de reglas, sin llamada a Claude — funciona sin `ANTHROPIC_API_KEY` |
 | Motor Metabólico | ✅ Funcional | Mifflin-St Jeor ⇄ Katch-McArdle verificado |
 | Nutrición IA | ⚠️ Falta la clave | Código listo (Claude Sonnet 5); sin `ANTHROPIC_API_KEY` devuelve datos de ejemplo marcados |
 | Escáner Corporal | ⚠️ Falta la clave | Igual que arriba. Flujo de confirmación implementado |
@@ -86,6 +87,26 @@ para que sepas cuáles conviene revisar.
 
 **Sin `ANTHROPIC_API_KEY` la app funciona igual, pero los análisis devuelven datos de
 ejemplo claramente marcados** (`is_mock: true`, nombres con `[EJEMPLO]`, confianza 0).
+
+---
+
+## 🏋️ Rutinas de entrenamiento — gratis, sin IA de pago
+
+`GET /api/workouts/plan?location=home|gym` genera una sesión equilibrada a partir del
+perfil que ya tienes guardado (objetivo, nivel de actividad, peso) — **no llama a Claude
+ni a ningún servicio de pago**. Es un motor de reglas (`WorkoutPlanner`), igual de
+determinista que el `MetabolicEngine` que calcula tus calorías, con 68 tests propios.
+
+- Selecciona un ejercicio por grupo muscular (piernas, empuje, tirón, hombros, core, y un
+  extra de cuerpo completo si tu actividad es alta), filtrando por el equipo disponible:
+  en casa solo peso corporal, en el gym también mancuernas/barra/máquina/polea.
+- Series, repeticiones y descanso se ajustan a tu objetivo (perder grasa → más reps,
+  menos descanso, más un remate de cardio; ganar músculo → menos reps, más descanso).
+- La rotación diaria usa la fecha como semilla, así que el ejercicio de cada grupo puede
+  variar de un día a otro sin guardar ningún estado.
+- Estima duración y calorías (MET 5.0 × tu peso), coherente con el resto de la app.
+
+Card "Tu rutina de hoy" en la pantalla Entrenar, con selector Casa/Gym.
 
 Coste estimado: ~1 céntimo de dólar por foto (~US$1,5/mes con 5 comidas diarias).
 

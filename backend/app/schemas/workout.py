@@ -52,3 +52,29 @@ class WorkoutSessionResponse(BaseModel):
     ended_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ── Workout Plan (rule-based, no AI call) ──────────────────────────
+
+
+class PlannedExerciseSchema(BaseModel):
+    """One exercise in a generated session."""
+    name: str
+    muscle_group: str
+    sets: int
+    reps_label: str = Field(..., description="e.g. '10-12' or '45 s' for timed holds")
+    rest_seconds: int
+    is_compound: bool
+
+
+class WorkoutPlanResponse(BaseModel):
+    """A balanced session generated from the user's profile and location."""
+    location: str
+    goal: str
+    warmup_minutes: int
+    exercises: List[PlannedExerciseSchema]
+    includes_cardio_finisher: bool
+    cardio_finisher_note: Optional[str] = None
+    estimated_duration_minutes: int
+    estimated_calories_burned: Optional[float] = None
+    coach_note: str

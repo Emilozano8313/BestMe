@@ -92,3 +92,53 @@ async def test_get_todays_workouts(async_client: AsyncClient, auth_headers: dict
 async def test_workouts_require_authentication(async_client: AsyncClient):
     response = await async_client.get("/api/workouts/today")
     assert response.status_code == 401
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Workout plan (rule-based, no AI call)
+# ═══════════════════════════════════════════════════════════════════
+#
+# WorkoutPlanner itself is covered in test_workout_planner.py; these tests
+# only exercise the endpoint boundary: auth, profile validation, and that
+# the response is actually assembled from the engine's output.
+
+
+async def test_get_workout_plan_home(async_client: AsyncClient, auth_headers: dict):
+    response = await async_client.get("/api/workouts/plan?location=home", headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["location"] == "home"
+    assert len(body["exercises"]) >= 4
+    assert body["estimated_duration_minutes"] > 0
+    # test_user has weight_kg set, so a calorie estimate must come back.
+    assert body["estimated_calories_burned"] is not None
+
+
+async def test_get_workout_plan_gym(async_client: AsyncClient, auth_headers: dict):
+    response = await async_client.get("/api/workouts/plan?location=gym", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["location"] == "gym"
+
+
+async def test_get_workout_plan_rejects_bad_location(async_client: AsyncClient, auth_headers: dict):
+    response = await async_client.get("/api/workouts/plan?location=beach", headers=auth_headers)
+    assert response.status_code == 422
+
+
+async def test_get_workout_plan_requires_authentication(async_client: AsyncClient):
+    response = await async_client.get("/api/workouts/plan?location=home")
+    assert response.status_code == 401
+
+
+async def test_get_workout_plan_requires_a_complete_profile(
+    async_client: AsyncClient, auth_headers: dict, test_user: User, db_session
+):
+    test_user.goal = None
+    db_session.add(test_user)
+    await db_session.commit()
+
+    response = await async_client.get("/api/workouts/plan?location=home", headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "objetivo" in response.json()["detail"]

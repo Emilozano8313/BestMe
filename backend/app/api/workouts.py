@@ -6,9 +6,9 @@ bioenergetic expenditure using MET values.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,13 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.models.workout_session import WorkoutSession
 from app.models.daily_metric import DailyMetric
-from app.schemas.workout import WorkoutSessionCreate, WorkoutSessionResponse
+from app.schemas.workout import (
+    PlannedExerciseSchema,
+    WorkoutPlanResponse,
+    WorkoutSessionCreate,
+    WorkoutSessionResponse,
+)
+from app.services.workout_planner import WorkoutPlanner
 
 router = APIRouter(prefix="/api/workouts", tags=["workouts"])
 
@@ -140,5 +146,54 @@ async def get_todays_workouts(
         )
         .order_by(WorkoutSession.created_at.asc())
     )
-    
+
     return result.scalars().all()
+
+
+@router.get("/plan", response_model=WorkoutPlanResponse)
+async def get_workout_plan(
+    location: Literal["home", "gym"] = Query(
+        ..., description="Dónde vas a entrenar hoy"
+    ),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate a balanced session for today from the user's stored profile.
+
+    This is a rule-based recommendation (WorkoutPlanner), not a Claude call —
+    it costs nothing and works with no ANTHROPIC_API_KEY configured.
+    """
+    if not current_user.goal or not current_user.activity_level:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Completa tu objetivo y nivel de actividad en el perfil para generar un plan.",
+        )
+
+    plan = WorkoutPlanner.compute_plan(
+        goal=current_user.goal.value,
+        activity_level=current_user.activity_level.value,
+        location=location,
+        weight_kg=current_user.weight_kg,
+    )
+
+    return WorkoutPlanResponse(
+        location=plan.location.value,
+        goal=plan.goal,
+        warmup_minutes=plan.warmup_minutes,
+        exercises=[
+            PlannedExerciseSchema(
+                name=ex.name,
+                muscle_group=ex.muscle_group.value,
+                sets=ex.sets,
+                reps_label=ex.reps_label,
+                rest_seconds=ex.rest_seconds,
+                is_compound=ex.is_compound,
+            )
+            for ex in plan.exercises
+        ],
+        includes_cardio_finisher=plan.includes_cardio_finisher,
+        cardio_finisher_note=plan.cardio_finisher_note,
+        estimated_duration_minutes=plan.estimated_duration_minutes,
+        estimated_calories_burned=plan.estimated_calories_burned,
+        coach_note=plan.coach_note,
+    )

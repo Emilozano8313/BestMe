@@ -30,6 +30,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
@@ -56,6 +57,40 @@ interface WorkoutSaved {
   total_sets: number;
 }
 
+// ── Workout plan (GET /workouts/plan) — rule-based, no AI, no cost ────
+
+type PlanLocation = 'home' | 'gym';
+
+interface PlannedExercise {
+  name: string;
+  muscle_group: string;
+  sets: number;
+  reps_label: string;
+  rest_seconds: number;
+  is_compound: boolean;
+}
+
+interface WorkoutPlan {
+  location: PlanLocation;
+  goal: string;
+  warmup_minutes: number;
+  exercises: PlannedExercise[];
+  includes_cardio_finisher: boolean;
+  cardio_finisher_note: string | null;
+  estimated_duration_minutes: number;
+  estimated_calories_burned: number | null;
+  coach_note: string;
+}
+
+const MUSCLE_GROUP_LABELS: Record<string, string> = {
+  legs: 'Piernas',
+  push: 'Empuje',
+  pull: 'Tirón',
+  shoulders: 'Hombros',
+  core: 'Core',
+  full_body: 'Cuerpo completo',
+};
+
 export default function TrainScreen() {
   const poseStatus = useMemo(() => getPoseDetectionStatus(), []);
 
@@ -64,6 +99,28 @@ export default function TrainScreen() {
   const [durationMin, setDurationMin] = useState('20');
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<WorkoutSaved | null>(null);
+
+  const [planLocation, setPlanLocation] = useState<PlanLocation>('home');
+  const [plan, setPlan] = useState<WorkoutPlan | null>(null);
+  const [isLoadingPlan, setIsLoadingPlan] = useState(true);
+  const [planError, setPlanError] = useState<string | null>(null);
+
+  const loadPlan = useCallback(async (location: PlanLocation) => {
+    setIsLoadingPlan(true);
+    const res = await api.get<WorkoutPlan>(`/workouts/plan?location=${location}`);
+    if (res.data) setPlan(res.data);
+    setPlanError(res.error);
+    setIsLoadingPlan(false);
+  }, []);
+
+  // Free and instant (no AI call), so re-fetching on every focus and every
+  // location change costs nothing and keeps the plan current with the
+  // user's latest profile.
+  useFocusEffect(
+    useCallback(() => {
+      void loadPlan(planLocation);
+    }, [loadPlan, planLocation]),
+  );
 
   const addSet = useCallback(() => {
     setSets((current) => [...current, { reps: '', weight: current.at(-1)?.weight ?? '' }]);
@@ -140,6 +197,91 @@ export default function TrainScreen() {
             <Text style={styles.title}>Entrenamiento</Text>
             <Text style={styles.subtitle}>Registra tu sesión y calcula lo que quemas.</Text>
           </View>
+
+          {/* Rule-based workout recommendation — no Claude call, so it
+              works with no API key and never costs anything. */}
+          <GlassCard style={styles.planCard} variant="highlight">
+            <View style={styles.planHeader}>
+              <Text style={styles.sectionTitle}>Tu rutina de hoy</Text>
+              <View style={styles.freeTag}>
+                <Ionicons name="flash-outline" size={11} color={palette.emerald} />
+                <Text style={styles.freeTagText}>Gratis</Text>
+              </View>
+            </View>
+
+            <View style={styles.locationRow}>
+              {(['home', 'gym'] as const).map((loc) => {
+                const active = planLocation === loc;
+                return (
+                  <Pressable
+                    key={loc}
+                    onPress={() => setPlanLocation(loc)}
+                    style={[styles.locationChip, active && styles.locationChipActive]}
+                  >
+                    <Ionicons
+                      name={loc === 'home' ? 'home-outline' : 'barbell-outline'}
+                      size={15}
+                      color={active ? palette.dark900 : palette.gray300}
+                    />
+                    <Text style={[styles.locationChipText, active && styles.locationChipTextActive]}>
+                      {loc === 'home' ? 'En casa' : 'En el gym'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {isLoadingPlan ? (
+              <ActivityIndicator color={palette.emerald} style={{ marginVertical: Spacing.lg }} />
+            ) : planError ? (
+              <Text style={styles.planErrorText}>{planError}</Text>
+            ) : plan ? (
+              <>
+                <View style={styles.planMetaRow}>
+                  <View style={styles.planMetaItem}>
+                    <Ionicons name="time-outline" size={13} color={palette.cyan} />
+                    <Text style={styles.planMetaText}>
+                      ~{plan.estimated_duration_minutes} min con calentamiento
+                    </Text>
+                  </View>
+                  {plan.estimated_calories_burned != null ? (
+                    <View style={styles.planMetaItem}>
+                      <Ionicons name="flame-outline" size={13} color={palette.coral} />
+                      <Text style={styles.planMetaText}>
+                        ~{Math.round(plan.estimated_calories_burned)} kcal
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {plan.exercises.map((ex, index) => (
+                  <View key={`${ex.name}-${index}`} style={styles.planExerciseRow}>
+                    <View style={styles.planExerciseIndex}>
+                      <Text style={styles.planExerciseIndexText}>{index + 1}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.planExerciseName}>{ex.name}</Text>
+                      <Text style={styles.planExerciseMeta}>
+                        {MUSCLE_GROUP_LABELS[ex.muscle_group] ?? ex.muscle_group} · {ex.sets} series
+                        {' × '}
+                        {ex.reps_label}
+                      </Text>
+                    </View>
+                    <Text style={styles.planExerciseRest}>{ex.rest_seconds}s desc.</Text>
+                  </View>
+                ))}
+
+                {plan.includes_cardio_finisher && plan.cardio_finisher_note ? (
+                  <View style={styles.finisherBox}>
+                    <Ionicons name="pulse-outline" size={15} color={palette.amber} />
+                    <Text style={styles.finisherText}>{plan.cardio_finisher_note}</Text>
+                  </View>
+                ) : null}
+
+                <Text style={styles.coachNote}>{plan.coach_note}</Text>
+              </>
+            ) : null}
+          </GlassCard>
 
           {/* Camera analysis availability */}
           {poseStatus.available ? (
@@ -335,6 +477,98 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weight.bold,
   },
   subtitle: { color: palette.gray300, fontSize: Typography.size.md, marginTop: 4 },
+
+  planCard: { marginBottom: Spacing.xl },
+  planHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.base,
+  },
+  freeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0, 214, 143, 0.10)',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
+  freeTagText: {
+    color: palette.emerald,
+    fontSize: Typography.size.xs,
+    fontWeight: Typography.weight.bold,
+  },
+
+  locationRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.base },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  locationChipActive: { backgroundColor: palette.emerald },
+  locationChipText: { color: palette.gray300, fontSize: Typography.size.sm },
+  locationChipTextActive: { color: palette.dark900, fontWeight: Typography.weight.bold },
+
+  planErrorText: {
+    color: palette.coral,
+    fontSize: Typography.size.sm,
+    paddingVertical: Spacing.sm,
+  },
+  planMetaRow: { flexDirection: 'row', gap: Spacing.lg, marginBottom: Spacing.base },
+  planMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  planMetaText: { color: palette.gray300, fontSize: Typography.size.xs },
+
+  planExerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  planExerciseIndex: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planExerciseIndexText: {
+    color: palette.gray300,
+    fontSize: Typography.size.xs,
+    fontWeight: Typography.weight.bold,
+  },
+  planExerciseName: {
+    color: palette.white,
+    fontSize: Typography.size.sm,
+    fontWeight: Typography.weight.semibold,
+  },
+  planExerciseMeta: { color: palette.gray400, fontSize: Typography.size.xs, marginTop: 1 },
+  planExerciseRest: { color: palette.gray500, fontSize: Typography.size.xs },
+
+  finisherBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 179, 64, 0.08)',
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    marginTop: Spacing.sm,
+  },
+  finisherText: { color: palette.amber, fontSize: Typography.size.xs, flex: 1, lineHeight: 16 },
+
+  coachNote: {
+    color: palette.gray400,
+    fontSize: Typography.size.xs,
+    lineHeight: 17,
+    marginTop: Spacing.sm,
+  },
 
   ctaGradient: { borderRadius: BorderRadius.xl, padding: Spacing.lg, marginBottom: Spacing.xl },
   ctaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
