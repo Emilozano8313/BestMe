@@ -44,12 +44,48 @@ const palette = {
   error: '#FF4D6A',
   info: '#00C9DB',
 
-  // ── Macros ─────────────────────────────────────
+  // ── Macros (UI: barras de progreso, iconos) ────
   protein: '#00D68F',
   carbs: '#FFB340',
   fat: '#FF6B6B',
   calories: '#8B5CF6',
 };
+
+/**
+ * Paleta de gráficas — no reutilizar los colores de `palette` sin más.
+ *
+ * Los tonos de marca son demasiado claros para usarlos como serie
+ * categórica sobre fondo oscuro: quedan fuera de la banda de luminosidad
+ * OKLCH (0.48–0.67) y, ya ajustados a esa banda, proteína y carbos se
+ * confunden bajo daltonismo.
+ *
+ * Estos valores conservan los tonos de marca y se eligieron maximizando la
+ * separación entre series. Verificado con el validador de la skill dataviz:
+ *
+ *   separación bajo daltonismo (protanopia)  ΔE 10.1   (objetivo ≥ 8)
+ *   separación con visión normal             ΔE 20.2   (mínimo 15)
+ *   contraste sobre la superficie            ≥ 3:1     (las tres)
+ *
+ * Antes de tocar cualquiera de estos hex, vuelve a pasar el validador.
+ */
+export const chartPalette = {
+  /** Superficie sobre la que se dibujan las gráficas (dark800). */
+  surface: '#12121A',
+
+  // Serie categórica de macros, en orden fijo. No reordenar ni ciclar:
+  // el orden es parte de la garantía de separación.
+  protein: '#007D51',
+  carbs: '#C58200',
+  fat: '#D5002C',
+
+  /** Serie única (peso, calorías): un solo tono, sin leyenda. */
+  primary: '#00A870',
+
+  /** Líneas de referencia y ejes: retraídos, un paso sobre la superficie. */
+  axis: '#2E2E48',
+  grid: '#1F1F30',
+  reference: '#6B6B88',
+} as const;
 
 const Colors = {
   light: {

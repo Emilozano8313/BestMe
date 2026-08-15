@@ -7,23 +7,29 @@ and daily metrics snapshot persistence.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.database import get_db
 from app.models.daily_metric import DailyMetric
+from app.models.meal import Meal
 from app.models.user import User
 from app.schemas.metrics import (
+    DailyPoint,
+    HistoryResponse,
+    HistorySummary,
     MacroSplitSchema,
     MetabolicProfileResponse,
     OnboardingRequest,
     OnboardingResponse,
     SnapshotResponse,
+    WeightLogRequest,
+    WeightLogResponse,
 )
 from app.services.metabolic import MetabolicEngine
 
@@ -230,6 +236,168 @@ async def complete_onboarding(
     await db.commit()
 
     return OnboardingResponse(metabolic_profile=profile)
+
+
+@router.get("/history", response_model=HistoryResponse)
+async def get_history(
+    days: int = Query(default=30, ge=2, le=365, description="Window size in days"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Daily series for the progress charts, plus summary aggregates.
+
+    Days with no `daily_metrics` row are returned as zeros rather than being
+    omitted, so the client can plot a continuous time axis without having to
+    reconstruct the missing dates itself.
+    """
+    today = date.today()
+    start = today - timedelta(days=days - 1)
+
+    metrics_rows = (
+        await db.execute(
+            select(DailyMetric)
+            .where(
+                DailyMetric.user_id == current_user.id,
+                DailyMetric.date >= start,
+                DailyMetric.date <= today,
+            )
+            .order_by(DailyMetric.date.asc())
+        )
+    ).scalars().all()
+
+    by_date = {row.date: row for row in metrics_rows}
+
+    # Meal counts per day, so the history list can show "3 comidas" without
+    # shipping every meal row to the client.
+    meal_counts_raw = (
+        await db.execute(
+            select(func.date(Meal.logged_at), func.count(Meal.id))
+            .where(
+                Meal.user_id == current_user.id,
+                Meal.logged_at >= datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
+            )
+            .group_by(func.date(Meal.logged_at))
+        )
+    ).all()
+
+    # SQLite returns an ISO string from date(); PostgreSQL returns a date.
+    meal_counts: dict[date, int] = {}
+    for day_value, count in meal_counts_raw:
+        key = day_value if isinstance(day_value, date) else date.fromisoformat(str(day_value))
+        meal_counts[key] = count
+
+    points: list[DailyPoint] = []
+    for offset in range(days):
+        day = start + timedelta(days=offset)
+        row = by_date.get(day)
+        points.append(
+            DailyPoint(
+                date=day,
+                calories_consumed=row.calories_consumed if row else 0.0,
+                calories_burned=row.calories_burned if row else 0.0,
+                calorie_target=row.calorie_target if row else None,
+                protein_g=row.protein_g if row else 0.0,
+                carbs_g=row.carbs_g if row else 0.0,
+                fat_g=row.fat_g if row else 0.0,
+                target_protein_g=row.target_protein_g if row else None,
+                target_carbs_g=row.target_carbs_g if row else None,
+                target_fat_g=row.target_fat_g if row else None,
+                weight_kg=row.weight_kg if row else None,
+                workout_minutes=row.workout_minutes if row else 0.0,
+                meal_count=meal_counts.get(day, 0),
+            )
+        )
+
+    # ── Summary ──────────────────────────────────────────────────
+    logged = [p for p in points if p.calories_consumed > 0 or p.meal_count > 0]
+    weights = [(p.date, p.weight_kg) for p in points if p.weight_kg is not None]
+
+    on_target = sum(
+        1
+        for p in logged
+        if p.calorie_target
+        and abs(p.calories_consumed - p.calorie_target) <= p.calorie_target * 0.10
+    )
+
+    summary = HistorySummary(
+        days_with_data=len(logged),
+        avg_calories_consumed=(
+            round(sum(p.calories_consumed for p in logged) / len(logged), 1) if logged else None
+        ),
+        avg_calories_burned=(
+            round(sum(p.calories_burned for p in logged) / len(logged), 1) if logged else None
+        ),
+        days_on_target=on_target,
+        latest_weight_kg=weights[-1][1] if weights else None,
+        weight_change_kg=(
+            round(weights[-1][1] - weights[0][1], 1) if len(weights) >= 2 else None
+        ),
+        total_workout_minutes=round(sum(p.workout_minutes for p in points), 1),
+    )
+
+    return HistoryResponse(days=days, points=points, summary=summary)
+
+
+@router.post("/weight", response_model=WeightLogResponse)
+async def log_weight(
+    payload: WeightLogRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Record a weight check-in and recompute the metabolic profile.
+
+    Weight feeds both BMR equations, so logging it is what keeps the calorie
+    target tracking reality instead of drifting from the onboarding snapshot.
+    """
+    _validate_user_has_profile(current_user)
+
+    target_day = payload.date or date.today()
+    if target_day > date.today():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede registrar un peso en el futuro.",
+        )
+
+    # The current weight is the profile weight; historical backfills only
+    # annotate that day and must not rewrite today's profile.
+    if target_day == date.today():
+        current_user.weight_kg = payload.weight_kg
+        current_user.updated_at = datetime.now(timezone.utc)
+        db.add(current_user)
+        await db.flush()
+
+    profile = _build_metabolic_response(current_user)
+
+    result = await db.execute(
+        select(DailyMetric).where(
+            DailyMetric.user_id == current_user.id,
+            DailyMetric.date == target_day,
+        )
+    )
+    metric = result.scalar_one_or_none()
+    if metric is None:
+        metric = DailyMetric(user_id=current_user.id, date=target_day)
+        db.add(metric)
+
+    metric.weight_kg = payload.weight_kg
+    if target_day == date.today():
+        metric.bmr = profile.bmr
+        metric.tdee = profile.tdee
+        metric.calorie_target = profile.calorie_target
+        metric.target_protein_g = profile.macros.protein_g
+        metric.target_carbs_g = profile.macros.carbs_g
+        metric.target_fat_g = profile.macros.fat_g
+    metric.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+
+    return WeightLogResponse(
+        date=target_day,
+        weight_kg=payload.weight_kg,
+        metabolic_profile=profile,
+    )
 
 
 @router.post("/snapshot", response_model=SnapshotResponse)

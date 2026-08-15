@@ -74,18 +74,22 @@ export default function TabLayout() {
       />
       
       <Tabs.Screen
-        name="scanner"
+        name="progress"
         options={{
-          title: 'Escáner',
+          title: 'Progreso',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'body' : 'body-outline'}
-              size={26}
+              name={focused ? 'stats-chart' : 'stats-chart-outline'}
+              size={24}
               color={color}
             />
           ),
         }}
       />
+
+      {/* Body scan lives inside the Profile screen rather than the tab bar:
+          six tabs crowd the bar, and scanning is an occasional action. */}
+      <Tabs.Screen name="scanner" options={{ href: null }} />
 
       <Tabs.Screen
         name="profile"

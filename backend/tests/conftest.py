@@ -20,17 +20,50 @@ from typing import AsyncIterator
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-not-used-in-production")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DEBUG", "false")
-os.environ.pop("ANTHROPIC_API_KEY", None)  # keep tests off the paid API
+os.environ.pop("ANTHROPIC_API_KEY", None)
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 
+from app.config import get_settings  # noqa: E402
 from app.core.security import create_access_token  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.user import ActivityLevel, FitnessGoal, Gender, User  # noqa: E402
+from app.services.vision import VisionService  # noqa: E402
+
+# ── Keep the suite off the paid API ──────────────────────────────
+#
+# Clearing the environment variable is NOT enough: pydantic-settings also
+# reads backend/.env, so a key configured there still reaches the tests and
+# every run bills real requests to Anthropic. Blank the resolved setting on
+# the cached Settings instance instead — that is what VisionService reads.
+_settings = get_settings()
+_settings.anthropic_api_key = None
+
+assert not VisionService.is_configured(), (
+    "Los tests no deben llamar a la API de pago. "
+    "VisionService sigue configurado pese a anular la clave."
+)
+
+
+@pytest.fixture(autouse=True)
+def _fail_on_real_api_call(monkeypatch):
+    """
+    Second line of defence.
+
+    If a future change re-enables the client, this turns a silent (billed)
+    network call into an obvious test failure.
+    """
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError(
+            "Un test intentó llamar a la API de Anthropic. "
+            "Los tests deben usar el modo de datos de ejemplo."
+        )
+
+    monkeypatch.setattr(VisionService, "_analyze", staticmethod(_forbidden))
 
 
 @pytest_asyncio.fixture
