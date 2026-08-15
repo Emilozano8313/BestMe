@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Below this, the estimate is too shaky to be worth acting on. Estimating
 # body fat from a single photo carries a several-point margin of error even
@@ -80,5 +80,4 @@ class BodyScanResponse(BaseModel):
     new_calorie_target: float
     equation_used: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
