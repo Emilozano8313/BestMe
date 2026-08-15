@@ -209,11 +209,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const inOnboardingGroup = group === '(onboarding)';
 
     if (!user && !inAuthGroup) {
-      router.replace('/(auth)/login' as never);
+      router.replace('/(auth)/login');
     } else if (user && needsOnboarding && !inOnboardingGroup) {
-      router.replace('/(onboarding)/step-basics' as never);
+      router.replace('/(onboarding)/step-basics');
     } else if (user && !needsOnboarding && (inAuthGroup || inOnboardingGroup)) {
-      router.replace('/(tabs)' as never);
+      router.replace('/(tabs)');
     }
   }, [user, segments, isLoading, needsOnboarding, router]);
 

@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   track: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: palette.dark500,
     borderRadius: BorderRadius.full,
   },

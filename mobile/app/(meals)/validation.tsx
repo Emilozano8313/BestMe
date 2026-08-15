@@ -34,16 +34,37 @@ interface DetectedFood {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  confidence?: number | null;
+}
+
+const MEAL_TYPES: { value: string; label: string; icon: any }[] = [
+  { value: 'breakfast', label: 'Desayuno', icon: 'sunny-outline' },
+  { value: 'lunch', label: 'Almuerzo', icon: 'restaurant-outline' },
+  { value: 'dinner', label: 'Cena', icon: 'moon-outline' },
+  { value: 'snack', label: 'Snack', icon: 'cafe-outline' },
+];
+
+/** Parse the AI payload defensively — a malformed param must not crash the screen. */
+function parseFoods(raw: string | undefined): DetectedFood[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export default function ValidationScreen() {
   const router = useRouter();
-  const { imageUri, aiData } = useLocalSearchParams<{ imageUri: string; aiData: string }>();
+  const { imageUri, aiData, mealType } = useLocalSearchParams<{
+    imageUri: string;
+    aiData: string;
+    mealType?: string;
+  }>();
 
-  // Parse the initial AI data (which is a JSON string of DetectedFood array)
-  const initialFoods: DetectedFood[] = aiData ? JSON.parse(aiData) : [];
-  
-  const [foods, setFoods] = useState<DetectedFood[]>(initialFoods);
+  const [foods, setFoods] = useState<DetectedFood[]>(() => parseFoods(aiData));
+  const [selectedMealType, setSelectedMealType] = useState<string>(mealType ?? 'lunch');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -85,20 +106,18 @@ export default function ValidationScreen() {
       setIsSubmitting(true);
       setError('');
 
-      // Send to POST /api/meals/
       const res = await api.post('/meals/', {
-        meal_type: 'lunch', // Ideally, allow user to select or infer from time
-        description: 'Auto-detectado',
-        photo_url: null, // Would require S3 upload first, skipping for now
-        detected_foods: foods,
-        manually_adjusted: true, // We assume true since they saw this screen
+        meal_type: selectedMealType,
+        description: null,
+        photo_url: null,
+        detected_foods: foods.map(({ confidence, ...food }) => food),
+        manually_adjusted: true, // they reviewed this screen
       });
 
       if (res.error) {
         throw new Error(res.error);
       }
 
-      // Go back to nutrition tab
       router.replace('/(tabs)/nutrition');
     } catch (err: any) {
       setError(err.message || 'Error al guardar la comida');
@@ -147,6 +166,29 @@ export default function ValidationScreen() {
             por lo que la IA puede calcular mal los gramos exactos.
           </Text>
 
+          {/* Meal type — inferred from the clock, changeable here */}
+          <View style={styles.mealTypeRow}>
+            {MEAL_TYPES.map((type) => {
+              const active = selectedMealType === type.value;
+              return (
+                <Pressable
+                  key={type.value}
+                  onPress={() => setSelectedMealType(type.value)}
+                  style={[styles.mealTypeChip, active && styles.mealTypeChipActive]}
+                >
+                  <Ionicons
+                    name={type.icon}
+                    size={16}
+                    color={active ? palette.dark900 : palette.gray300}
+                  />
+                  <Text style={[styles.mealTypeText, active && styles.mealTypeTextActive]}>
+                    {type.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
           {/* Totals Summary */}
           <GlassCard style={styles.summaryCard} variant="highlight">
             <View style={styles.summaryRow}>
@@ -188,6 +230,17 @@ export default function ValidationScreen() {
                   <Ionicons name="trash-outline" size={20} color={palette.coral} />
                 </Pressable>
               </View>
+
+              {/* Flags the portions the AI was least sure about, so the user
+                  knows which numbers are worth double-checking. */}
+              {typeof food.confidence === 'number' && food.confidence < 0.6 ? (
+                <View style={styles.lowConfidenceRow}>
+                  <Ionicons name="alert-circle-outline" size={13} color={palette.amber} />
+                  <Text style={styles.lowConfidenceText}>
+                    Porción poco fiable ({Math.round(food.confidence * 100)}%) — revisa los gramos
+                  </Text>
+                </View>
+              ) : null}
 
               <View style={styles.macrosGrid}>
                 {/* Grams (Editable) */}
@@ -317,6 +370,36 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
     textAlign: 'center',
   },
+
+  // Meal type selector
+  mealTypeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.xl,
+    justifyContent: 'center',
+  },
+  mealTypeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  mealTypeChipActive: { backgroundColor: palette.emerald },
+  mealTypeText: { color: palette.gray300, fontSize: Typography.size.sm },
+  mealTypeTextActive: { color: palette.dark900, fontWeight: Typography.weight.bold },
+
+  // Low-confidence warning
+  lowConfidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: Spacing.sm,
+  },
+  lowConfidenceText: { color: palette.amber, fontSize: Typography.size.xs, flex: 1 },
 
   // Summary
   summaryCard: { marginBottom: Spacing.xl },

@@ -37,7 +37,7 @@ export default function TrainScreen() {
     lastKneeAngle: 180,
   });
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const frameLoopRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
 
@@ -125,12 +125,12 @@ export default function TrainScreen() {
         ]
       };
 
-      const res = await api.post('/workouts/', payload);
+      const res = await api.post<{ calories_burned: number }>('/workouts/', payload);
 
-      if (res.error) throw new Error(res.error);
+      if (res.error || !res.data) throw new Error(res.error ?? 'No se pudo guardar la sesión');
 
       Alert.alert(
-        '¡Sesión Guardada!', 
+        '¡Sesión Guardada!',
         `Quemaste ${Math.round(res.data.calories_burned)} kcal.\nTu técnica fue del ${Math.round(bioState.formScore * 100)}%.`
       );
 

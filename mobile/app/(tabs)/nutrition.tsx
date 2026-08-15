@@ -6,7 +6,7 @@
  * Now connected to real backend data.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   StyleSheet,
   ScrollView,
@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -56,6 +56,15 @@ const TYPE_ICONS: Record<string, any> = {
   snack: { icon: 'cafe-outline', color: palette.cyan },
 };
 
+/** Best guess at which meal this is, from the clock. The user can change it. */
+function inferMealType(date = new Date()): string {
+  const hour = date.getHours();
+  if (hour < 11) return 'breakfast';
+  if (hour < 16) return 'lunch';
+  if (hour < 22) return 'dinner';
+  return 'snack';
+}
+
 export default function NutritionScreen() {
   const router = useRouter();
   const { metabolicProfile, refreshMetabolicProfile } = useAuth();
@@ -63,24 +72,23 @@ export default function NutritionScreen() {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadMeals();
-    refreshMetabolicProfile();
-  }, []);
+  // Reloads on focus so a meal saved on the validation screen shows up
+  // as soon as the user lands back here.
+  useFocusEffect(
+    useCallback(() => {
+      void loadMeals();
+      void refreshMetabolicProfile();
+    }, []),
+  );
 
   const loadMeals = async () => {
     setIsLoading(true);
-    try {
-      const res = await api.get<Meal[]>('/meals/today');
-      if (res.data) {
-        setMeals(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to load meals', err);
-    } finally {
-      setIsLoading(false);
-    }
+    const res = await api.get<Meal[]>('/meals/today');
+    if (res.data) setMeals(res.data);
+    setLoadError(res.error);
+    setIsLoading(false);
   };
 
   // ── Camera / AI Flow ──────────────────────────────────────────
@@ -95,7 +103,7 @@ export default function NutritionScreen() {
 
     // 2. Launch Camera
     const pickerResult = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.8,
@@ -107,18 +115,30 @@ export default function NutritionScreen() {
       setIsAnalyzing(true);
       const uri = pickerResult.assets[0].uri;
 
-      // 3. Resize image to save bandwidth (GPT-4 Vision doesn't need 4K)
+      // 3. Resize before upload — a 4K photo costs bandwidth and image
+      // tokens without improving the estimate.
       const manipResult = await ImageManipulator.manipulateAsync(
         uri,
-        [{ resize: { width: 800 } }],
+        [{ resize: { width: 1024 } }],
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
       );
 
       // 4. Send to API
-      const response = await api.uploadImage<{ foods: any[] }>('/meals/analyze', manipResult.uri);
-      
+      const response = await api.uploadImage<{ foods: any[]; is_mock: boolean }>(
+        '/meals/analyze',
+        manipResult.uri,
+      );
+
       if (response.error || !response.data) {
         throw new Error(response.error || 'Error al analizar la imagen');
+      }
+
+      if (response.data.is_mock) {
+        Alert.alert(
+          'Modo de ejemplo',
+          'El servidor no tiene configurada la clave de IA, así que estos alimentos ' +
+            'son de ejemplo y no corresponden a tu foto. Añade ANTHROPIC_API_KEY en el backend.',
+        );
       }
 
       // 5. Navigate to Validation screen with AI data
@@ -127,6 +147,7 @@ export default function NutritionScreen() {
         params: {
           imageUri: manipResult.uri,
           aiData: JSON.stringify(response.data.foods),
+          mealType: inferMealType(),
         },
       });
 
@@ -179,6 +200,13 @@ export default function NutritionScreen() {
           <Text style={styles.title}>Nutrición</Text>
           <Text style={styles.date}>Hoy, {today}</Text>
         </View>
+
+        {loadError ? (
+          <View style={styles.errorBanner}>
+            <Ionicons name="cloud-offline-outline" size={16} color={palette.coral} />
+            <Text style={styles.errorBannerText}>{loadError}</Text>
+          </View>
+        ) : null}
 
         {/* Summary Card */}
         <GlassCard variant="highlight" style={styles.summaryCard}>
@@ -270,7 +298,7 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing['2xl'] },
   
   analyzingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.85)',
     zIndex: 100,
     alignItems: 'center',
@@ -286,6 +314,17 @@ const styles = StyleSheet.create({
   header: { marginBottom: Spacing.xl },
   title: { color: palette.white, fontSize: Typography.size['3xl'], fontWeight: Typography.weight.bold },
   date: { color: palette.gray300, fontSize: Typography.size.md, marginTop: 4 },
+
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 107, 107, 0.10)',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.base,
+  },
+  errorBannerText: { color: palette.coral, fontSize: Typography.size.sm, flex: 1 },
 
   summaryCard: { marginBottom: Spacing.lg },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },

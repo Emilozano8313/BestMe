@@ -244,25 +244,25 @@ export default function HomeScreen() {
             icon="camera-outline"
             label="Escanear Comida"
             gradient={[palette.emerald, palette.cyan]}
-            onPress={() => router.push('/(tabs)/nutrition' as never)}
+            onPress={() => router.push('/(tabs)/nutrition')}
           />
           <QuickAction
             icon="barbell-outline"
             label="Entrenar"
             gradient={[palette.violet, palette.violetLight]}
-            onPress={() => router.push('/(tabs)/train' as never)}
+            onPress={() => router.push('/(tabs)/train')}
           />
           <QuickAction
             icon="body-outline"
             label="Body Scan"
             gradient={[palette.coral, palette.amber]}
-            onPress={() => router.push('/(tabs)/scanner' as never)}
+            onPress={() => router.push('/(tabs)/scanner')}
           />
           <QuickAction
             icon="analytics-outline"
             label="Métricas"
             gradient={[palette.cyan, palette.cyanLight]}
-            onPress={() => router.push('/(tabs)/profile' as never)}
+            onPress={() => router.push('/(tabs)/profile')}
           />
         </View>
 
