@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
@@ -94,6 +95,7 @@ function formatFullDay(iso: string): string {
 }
 
 export default function ProgressScreen() {
+  const insets = useSafeAreaInsets();
   const { refreshMetabolicProfile } = useAuth();
 
   const [range, setRange] = useState<number>(30);
@@ -150,8 +152,14 @@ export default function ProgressScreen() {
     }
     setIsSavingWeight(true);
     try {
-      const res = await api.post('/metrics/weight', { weight_kg: parsed });
+      const res = await api.post('/metrics/weight', { weight_kg: parsed }, 'Peso registrado');
       if (res.error) throw new Error(res.error);
+      if (res.queued) {
+        Alert.alert(
+          'Guardado sin conexión',
+          'Tu peso se sincronizará apenas vuelva el internet.',
+        );
+      }
       setWeightDraft('');
       await load(range);
       await refreshMetabolicProfile();
@@ -236,6 +244,14 @@ export default function ProgressScreen() {
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={palette.dark900} />
+
+      {/* Fixed header — outside the ScrollView so Android's pull-to-refresh
+          can never drag it under the status bar / camera cutout. */}
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
+        <Text style={styles.title}>Progreso</Text>
+        <Text style={styles.subtitle}>Tu evolución a lo largo del tiempo.</Text>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -248,11 +264,6 @@ export default function ProgressScreen() {
           />
         }
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>Progreso</Text>
-          <Text style={styles.subtitle}>Tu evolución a lo largo del tiempo.</Text>
-        </View>
-
         {loadError ? (
           <View style={styles.errorBanner}>
             <Ionicons name="cloud-offline-outline" size={16} color={palette.coral} />
@@ -439,9 +450,13 @@ export default function ProgressScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: palette.dark900 },
   centered: { alignItems: 'center', justifyContent: 'center' },
-  scrollContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing['2xl'] },
+  scrollContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
 
-  header: { marginBottom: Spacing.lg },
+  header: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+    backgroundColor: palette.dark900,
+  },
   title: {
     color: palette.white,
     fontSize: Typography.size['3xl'],

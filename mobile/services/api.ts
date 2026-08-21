@@ -19,6 +19,16 @@
  * On a physical phone you MUST set EXPO_PUBLIC_API_URL to your machine's
  * LAN address (e.g. http://192.168.1.42:8000/api) or your deployed URL.
  */
+import { File, UploadType } from 'expo-file-system';
+import {
+  enqueueMutation,
+  getCached,
+  getQueue,
+  removeFromQueue,
+  setCached,
+  type QueuedMutation,
+} from './offlineStore';
+
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:8000/api';
 
@@ -26,6 +36,10 @@ export interface ApiResponse<T> {
   data: T | null;
   error: string | null;
   status: number;
+  /** True when there was no connection and this write was queued instead of sent. */
+  queued?: boolean;
+  /** True when there was no connection and this is the last cached copy, not a live read. */
+  fromCache?: boolean;
 }
 
 export interface AuthTokens {
@@ -148,6 +162,7 @@ class ApiClient {
     path: string,
     init: RequestInit,
     allowRetry = true,
+    queueDescription?: string,
   ): Promise<ApiResponse<T>> {
     let response: Response;
 
@@ -157,9 +172,34 @@ class ApiClient {
         headers: { ...(init.headers as Record<string, string>), ...this.authHeaders() },
       });
     } catch (error: any) {
+      // No connection reached the server at all — this is the offline case,
+      // not a 4xx/5xx from a request that got there. Two ways out:
+      //   - a GET: serve the last cached copy of this exact path, if we have one.
+      //   - a mutation the caller marked as queueable: save it for later instead
+      //     of losing it. Mutations that don't set queueDescription (login,
+      //     register, refresh) fall through to the plain error below — replaying
+      //     a login attempt later makes no sense.
+      const method = (init.method ?? 'GET').toUpperCase();
+
+      if (method === 'GET') {
+        const cached = await getCached<T>(path);
+        if (cached) {
+          return { data: cached.data, error: null, status: 0, fromCache: true };
+        }
+      } else if (queueDescription) {
+        await enqueueMutation({
+          method: method as QueuedMutation['method'],
+          path,
+          body: init.body ? JSON.parse(init.body as string) : null,
+          description: queueDescription,
+        });
+        return { data: null, error: null, status: 0, queued: true };
+      }
+
+      const detail = error?.message ? ` — ${error.message}` : '';
       return {
         data: null,
-        error: `No se pudo conectar con el servidor (${this.baseUrl}). Revisa tu conexión.`,
+        error: `No se pudo conectar con el servidor (${this.baseUrl}${path})${detail}. Revisa tu conexión.`,
         status: 0,
       };
     }
@@ -168,7 +208,7 @@ class ApiClient {
     if (response.status === 401 && allowRetry && this.refreshToken) {
       const refreshed = await this.refreshAccessToken();
       if (refreshed) {
-        return this.request<T>(path, init, false);
+        return this.request<T>(path, init, false, queueDescription);
       }
     }
 
@@ -184,6 +224,10 @@ class ApiClient {
       body = await response.json();
     } catch {
       body = null;
+    }
+
+    if (response.ok && (init.method ?? 'GET').toUpperCase() === 'GET') {
+      void setCached(path, body);
     }
 
     if (!response.ok) {
@@ -203,32 +247,85 @@ class ApiClient {
     return this.request<T>(path, { method: 'GET' });
   }
 
-  post<T>(path: string, body?: unknown) {
-    return this.request<T>(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+  /**
+   * @param queueOffline - When set, a network failure queues this write
+   *   instead of just failing — pass a short description ("Comida
+   *   registrada") shown in the pending-sync list. Omit for writes that
+   *   only make sense live (login, register, token refresh).
+   */
+  post<T>(path: string, body?: unknown, queueOffline?: string) {
+    return this.request<T>(
+      path,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      },
+      true,
+      queueOffline,
+    );
   }
 
-  put<T>(path: string, body?: unknown) {
-    return this.request<T>(path, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+  put<T>(path: string, body?: unknown, queueOffline?: string) {
+    return this.request<T>(
+      path,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      },
+      true,
+      queueOffline,
+    );
   }
 
-  patch<T>(path: string, body?: unknown) {
-    return this.request<T>(path, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+  patch<T>(path: string, body?: unknown, queueOffline?: string) {
+    return this.request<T>(
+      path,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      },
+      true,
+      queueOffline,
+    );
   }
 
   delete<T>(path: string) {
     return this.request<T>(path, { method: 'DELETE' });
+  }
+
+  // ── Offline queue sync ───────────────────────────────────────────
+
+  /**
+   * Replays queued writes in the order they were made. Stops at the first
+   * one that still fails — if we're still offline, there's no point
+   * hammering through the rest, and stopping preserves ordering for the
+   * next attempt.
+   */
+  async flushQueue(): Promise<{ flushed: number; remaining: number }> {
+    const queue = await getQueue();
+    let flushed = 0;
+
+    for (const item of queue) {
+      const res = await this.request(item.path, {
+        method: item.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: item.body !== null ? JSON.stringify(item.body) : undefined,
+      });
+      if (res.error) {
+        // Still offline, or the server rejected it — either way, stop and
+        // leave this (and everything after it) in the queue rather than
+        // silently discarding something the server didn't actually accept.
+        break;
+      }
+      await removeFromQueue(item.id);
+      flushed += 1;
+    }
+
+    const remaining = (await getQueue()).length;
+    return { flushed, remaining };
   }
 
   /**
@@ -246,18 +343,64 @@ class ApiClient {
     });
   }
 
-  /** Multipart upload for camera images. */
-  uploadImage<T>(path: string, imageUri: string, fieldName = 'file') {
-    const formData = new FormData();
+  /**
+   * Multipart upload for camera images.
+   *
+   * Goes through `expo-file-system`'s native upload task instead of a plain
+   * `fetch(FormData)` — React Native's New Architecture FormData polyfill
+   * throws "Unsupported FormDataPart implementation" for the classic
+   * `{ uri, name, type }` file-part shape, so a manual FormData body is
+   * unreliable here even though it works fine for JSON requests.
+   */
+  async uploadImage<T>(
+    path: string,
+    imageUri: string,
+    fieldName = 'file',
+    allowRetry = true,
+  ): Promise<ApiResponse<T>> {
     const filename = imageUri.split('/').pop() || 'photo.jpg';
     const match = /\.(\w+)$/.exec(filename);
-    const type = match ? `image/${match[1].toLowerCase()}` : 'image/jpeg';
+    const mimeType = match ? `image/${match[1].toLowerCase()}` : 'image/jpeg';
 
-    formData.append(fieldName, { uri: imageUri, name: filename, type } as any);
+    let result: { status: number; body: string };
+    try {
+      const file = new File(imageUri);
+      result = await file.upload(`${this.baseUrl}${path}`, {
+        httpMethod: 'POST',
+        uploadType: UploadType.MULTIPART,
+        fieldName,
+        mimeType,
+        headers: this.authHeaders(),
+      });
+    } catch (error: any) {
+      const detail = error?.message ? ` — ${error.message}` : '';
+      return {
+        data: null,
+        error: `No se pudo conectar con el servidor (${this.baseUrl}${path})${detail}. Revisa tu conexión.`,
+        status: 0,
+      };
+    }
 
-    // Content-Type is intentionally omitted: fetch sets the multipart
-    // boundary itself, and overriding it breaks the upload.
-    return this.request<T>(path, { method: 'POST', body: formData });
+    // Expired access token → refresh once, then replay the upload.
+    if (result.status === 401 && allowRetry && this.refreshToken) {
+      const refreshed = await this.refreshAccessToken();
+      if (refreshed) {
+        return this.uploadImage<T>(path, imageUri, fieldName, false);
+      }
+    }
+
+    let body: unknown = null;
+    try {
+      body = result.body ? JSON.parse(result.body) : null;
+    } catch {
+      body = null;
+    }
+
+    if (result.status < 200 || result.status >= 300) {
+      return { data: null, error: extractErrorMessage(body, result.status), status: result.status };
+    }
+
+    return { data: body as T, error: null, status: result.status };
   }
 }
 

@@ -36,10 +36,15 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # which `uvicorn` alone does not do. PORT is honoured because most cloud
 # platforms (Railway, Render, Fly) assign it at runtime.
 #
+# Migrations run here, not as a separate step, because the DB is only
+# reachable from inside the platform's private network — there is no
+# "run it from my machine" option once DATABASE_URL points at a Railway
+# internal hostname.
+#
 # Development uses docker-compose, which overrides this command with
 # `--reload`; --reload must never run in production (it spawns a file
 # watcher and disables the worker model).
-CMD ["sh", "-c", "gunicorn app.main:app \
+CMD ["sh", "-c", "alembic upgrade head && gunicorn app.main:app \
     --worker-class uvicorn.workers.UvicornWorker \
     --workers ${WEB_CONCURRENCY:-2} \
     --bind 0.0.0.0:${PORT:-8000} \

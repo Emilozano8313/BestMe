@@ -18,6 +18,7 @@ import {
   Platform,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -106,16 +107,27 @@ export default function ValidationScreen() {
       setIsSubmitting(true);
       setError('');
 
-      const res = await api.post('/meals/', {
-        meal_type: selectedMealType,
-        description: null,
-        photo_url: null,
-        detected_foods: foods.map(({ confidence, ...food }) => food),
-        manually_adjusted: true, // they reviewed this screen
-      });
+      const res = await api.post(
+        '/meals/',
+        {
+          meal_type: selectedMealType,
+          description: null,
+          photo_url: null,
+          detected_foods: foods.map(({ confidence, ...food }) => food),
+          manually_adjusted: true, // they reviewed this screen
+        },
+        'Comida registrada',
+      );
 
       if (res.error) {
         throw new Error(res.error);
+      }
+
+      if (res.queued) {
+        Alert.alert(
+          'Guardada sin conexión',
+          'La comida se sincronizará y sumará a tu balance apenas vuelva el internet.',
+        );
       }
 
       router.replace('/(tabs)/nutrition');

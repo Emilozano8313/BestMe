@@ -8,7 +8,7 @@ import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { palette } from '@/constants/Colors';
 
@@ -39,6 +39,8 @@ const BestMeDarkTheme = {
 };
 
 import { AuthProvider } from '@/context/AuthContext';
+import { NetworkProvider } from '@/context/NetworkContext';
+import { OfflineBanner } from '@/components/ui/OfflineBanner';
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -60,16 +62,21 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={BestMeDarkTheme}>
-      <AuthProvider>
-        <Stack>
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-          <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="(meals)" options={{ headerShown: false, presentation: 'modal' }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-        </Stack>
-      </AuthProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider value={BestMeDarkTheme}>
+        <NetworkProvider>
+          <AuthProvider>
+            <OfflineBanner />
+            <Stack screenOptions={{ animation: 'none' }}>
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="(meals)" options={{ headerShown: false, presentation: 'modal' }} />
+              <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+            </Stack>
+          </AuthProvider>
+        </NetworkProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

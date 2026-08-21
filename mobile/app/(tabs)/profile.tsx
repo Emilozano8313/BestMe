@@ -20,6 +20,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -88,6 +89,7 @@ function initialsOf(fullName: string | undefined): string {
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, metabolicProfile, logout, updateProfile } = useAuth();
 
   const [isEditingWeight, setIsEditingWeight] = useState(false);
@@ -143,7 +145,7 @@ export default function ProfileScreen() {
       <StatusBar barStyle="light-content" backgroundColor={palette.dark900} />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + Spacing.md }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Header / Avatar ────────────────────────── */}

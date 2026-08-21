@@ -18,6 +18,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -63,6 +64,7 @@ const GOAL_ICONS: Record<string, string> = {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, metabolicProfile, refreshMetabolicProfile } = useAuth();
   const [isLoading, setIsLoading] = useState(!metabolicProfile);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -144,6 +146,20 @@ export default function HomeScreen() {
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={palette.dark900} />
+
+      {/* Fixed header — lives outside the ScrollView so pull-to-refresh
+          on Android can never drag it under the status bar / camera cutout. */}
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
+        <View>
+          <Text style={styles.greeting}>{greeting},</Text>
+          <Text style={styles.userName}>{userName} 👋</Text>
+        </View>
+        <View style={styles.streakBadge}>
+          <Ionicons name="flame" size={16} color={palette.amber} />
+          <Text style={styles.streakText}>0</Text>
+        </View>
+      </View>
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -163,18 +179,6 @@ export default function HomeScreen() {
             <Text style={styles.errorBannerText}>{loadError}</Text>
           </View>
         ) : null}
-
-        {/* ── Header ─────────────────────────────────── */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greeting},</Text>
-            <Text style={styles.userName}>{userName} 👋</Text>
-          </View>
-          <View style={styles.streakBadge}>
-            <Ionicons name="flame" size={16} color={palette.amber} />
-            <Text style={styles.streakText}>0</Text>
-          </View>
-        </View>
 
         {/* ── Calorie Ring Card ───────────────────────── */}
         <GlassCard style={styles.calorieCard} variant="highlight">
@@ -347,7 +351,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing['2xl'],
+    paddingTop: Spacing.md,
   },
 
   // Offline / error banner
@@ -381,7 +385,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+    backgroundColor: palette.dark900,
   },
   greeting: {
     color: palette.gray300,

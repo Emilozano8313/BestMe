@@ -18,6 +18,7 @@ import {
   Alert,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -67,6 +68,7 @@ function inferMealType(date = new Date()): string {
 
 export default function NutritionScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { metabolicProfile, refreshMetabolicProfile } = useAuth();
   
   const [meals, setMeals] = useState<Meal[]>([]);
@@ -194,7 +196,11 @@ export default function NutritionScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + Spacing.md }]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Nutrición</Text>

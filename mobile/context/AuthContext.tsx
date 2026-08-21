@@ -12,6 +12,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { useRouter, useSegments } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import api, { type AuthTokens } from '../services/api';
+import { clearAllOfflineData } from '../services/offlineStore';
 
 // ── Storage keys ──────────────────────────────────────────────────
 
@@ -144,6 +145,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMetabolicProfile(null);
     api.setTokens(null);
     await persistTokens(null);
+    // A second account signing in on this device must never inherit this
+    // one's cached reads or replay its queued offline writes.
+    await clearAllOfflineData();
   }, []);
 
   signOutRef.current = () => {

@@ -4,7 +4,7 @@ BestMe — History & Weight Tests
 Covers the series that feeds the progress charts and the weight check-in.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -39,7 +39,7 @@ async def test_history_returns_a_continuous_series(
 
     days = [point["date"] for point in body["points"]]
     assert days == sorted(days), "la serie debe venir ordenada"
-    assert days[-1] == date.today().isoformat(), "el último punto es hoy"
+    assert days[-1] == datetime.now(timezone.utc).date().isoformat(), "el último punto es hoy"
 
     # Consecutive, no holes.
     parsed = [date.fromisoformat(d) for d in days]
@@ -82,7 +82,7 @@ async def test_log_weight_updates_profile_and_target(
     assert response.status_code == 200
     body = response.json()
     assert body["weight_kg"] == 78.5
-    assert body["date"] == date.today().isoformat()
+    assert body["date"] == datetime.now(timezone.utc).date().isoformat()
 
     # Weight feeds the BMR equation, so the target must move.
     assert body["metabolic_profile"]["calorie_target"] < before["calorie_target"]
@@ -107,7 +107,7 @@ async def test_logged_weight_appears_in_history(async_client: AsyncClient, auth_
 async def test_weight_change_is_computed_across_the_window(
     async_client: AsyncClient, auth_headers: dict
 ):
-    three_days_ago = (date.today() - timedelta(days=3)).isoformat()
+    three_days_ago = (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat()
 
     await async_client.post(
         "/api/metrics/weight",
@@ -130,7 +130,7 @@ async def test_backfilled_weight_does_not_rewrite_todays_profile(
 ):
     """Filling in a missed day must not change what the user weighs today."""
     original = test_user.weight_kg
-    past = (date.today() - timedelta(days=5)).isoformat()
+    past = (datetime.now(timezone.utc).date() - timedelta(days=5)).isoformat()
 
     await async_client.post(
         "/api/metrics/weight",
@@ -143,7 +143,7 @@ async def test_backfilled_weight_does_not_rewrite_todays_profile(
 
 
 async def test_weight_rejects_future_dates(async_client: AsyncClient, auth_headers: dict):
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
     response = await async_client.post(
         "/api/metrics/weight",
         headers=auth_headers,
@@ -166,7 +166,7 @@ async def test_days_on_target_counts_only_days_within_ten_percent(
     # Onboarding-style row: a target with intake right on it.
     metric = DailyMetric(
         user_id=test_user.id,
-        date=date.today(),
+        date=datetime.now(timezone.utc).date(),
         calorie_target=2000.0,
         calories_consumed=1950.0,
     )

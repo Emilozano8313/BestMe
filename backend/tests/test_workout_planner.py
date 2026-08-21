@@ -11,14 +11,18 @@ import pytest
 
 from app.services.workout_planner import (
     CARDIO_FINISHER_MINUTES,
+    CARDIO_FINISHER_NOTE,
     EXERCISE_DATABASE,
+    FOCUS_SESSION_SIZE,
     GOAL_SCHEMES,
     GYM_EQUIPMENT,
     HOME_EQUIPMENT,
     SECONDS_PER_SET,
     SESSION_SIZE,
     WARMUP_MINUTES,
+    WARMUP_ROUTINE,
     Location,
+    MuscleGroup,
     WorkoutPlanner,
 )
 
@@ -163,6 +167,42 @@ class TestCardioFinisher:
             else:
                 assert plan.cardio_finisher_note is None
 
+    def test_finisher_note_offers_a_no_equipment_option(self):
+        """
+        Regression test: the note used to only list bici/cinta/cuerda, all of
+        which need equipment. A home user with nothing should still have a
+        cardio option (walking) they can actually do.
+        """
+        assert "caminata" in CARDIO_FINISHER_NOTE.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Warm-up
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestWarmup:
+    def test_warmup_is_present_and_matches_warmup_minutes(self):
+        plan = WorkoutPlanner.compute_plan(
+            goal="maintain", activity_level="moderate", location="home", seed=0
+        )
+        assert len(plan.warmup_exercises) > 0
+        total_seconds = sum(step.duration_seconds for step in plan.warmup_exercises)
+        assert total_seconds == WARMUP_MINUTES * 60
+
+    def test_warmup_is_bodyweight_only_and_goal_independent(self):
+        """
+        The warm-up is joint mobility, not training stimulus — it shouldn't
+        vary by goal or location, and it must never require equipment.
+        """
+        home_plan = WorkoutPlanner.compute_plan(
+            goal="lose_weight", activity_level="active", location="home", seed=1
+        )
+        gym_plan = WorkoutPlanner.compute_plan(
+            goal="gain_muscle", activity_level="sedentary", location="gym", seed=2
+        )
+        assert home_plan.warmup_exercises == gym_plan.warmup_exercises == WARMUP_ROUTINE
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Duration & calorie estimate
@@ -291,3 +331,88 @@ class TestPlanShape:
         )
         names = [ex.name for ex in plan.exercises]
         assert len(names) == len(set(names))
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Focus mode ("chest day" — several exercises from one muscle group)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestFocusMode:
+    @pytest.mark.parametrize("group", list(MuscleGroup))
+    @pytest.mark.parametrize("location", ["home", "gym"])
+    def test_focus_only_returns_that_muscle_group(self, group, location):
+        plan = WorkoutPlanner.compute_plan(
+            goal="maintain",
+            activity_level="moderate",
+            location=location,
+            focus=group.value,
+            seed=0,
+        )
+        assert plan.focus == group.value
+        assert len(plan.exercises) > 0
+        for ex in plan.exercises:
+            assert ex.muscle_group == group
+
+    @pytest.mark.parametrize("group", list(MuscleGroup))
+    def test_focus_home_never_requires_equipment(self, group):
+        plan = WorkoutPlanner.compute_plan(
+            goal="maintain", activity_level="moderate", location="home", focus=group.value, seed=0
+        )
+        by_name = {ex.name: ex for ex in EXERCISE_DATABASE}
+        for planned in plan.exercises:
+            assert by_name[planned.name].equipment.issubset(HOME_EQUIPMENT)
+
+    def test_focus_session_capped_and_never_repeats(self):
+        for group in MuscleGroup:
+            plan = WorkoutPlanner.compute_plan(
+                goal="maintain", activity_level="moderate", location="gym", focus=group.value, seed=1
+            )
+            names = [ex.name for ex in plan.exercises]
+            assert len(names) == len(set(names))
+            assert len(names) <= FOCUS_SESSION_SIZE
+
+    def test_focus_ignores_activity_level_session_size(self):
+        """A focus session's length depends on the group, not activity_level."""
+        sedentary = WorkoutPlanner.compute_plan(
+            goal="maintain", activity_level="sedentary", location="gym", focus="push", seed=0
+        )
+        very_active = WorkoutPlanner.compute_plan(
+            goal="maintain", activity_level="very_active", location="gym", focus="push", seed=0
+        )
+        assert sedentary.exercises == very_active.exercises
+
+    def test_unknown_focus_raises(self):
+        with pytest.raises(ValueError):
+            WorkoutPlanner.compute_plan(
+                goal="maintain", activity_level="moderate", location="home", focus="neck"
+            )
+
+    def test_no_focus_defaults_to_none(self):
+        plan = WorkoutPlanner.compute_plan(
+            goal="maintain", activity_level="moderate", location="home", seed=0
+        )
+        assert plan.focus is None
+
+    def test_coach_note_mentions_the_focus_group(self):
+        plan = WorkoutPlanner.compute_plan(
+            goal="maintain", activity_level="moderate", location="home", focus="push", seed=0
+        )
+        assert "empuje" in plan.coach_note.lower()
+
+    def test_focus_rotates_with_seed(self):
+        """Different seeds should surface different exercises when there's more than one option."""
+        picks = {
+            frozenset(
+                ex.name
+                for ex in WorkoutPlanner.compute_plan(
+                    goal="maintain",
+                    activity_level="moderate",
+                    location="gym",
+                    focus="legs",
+                    seed=seed,
+                ).exercises
+            )
+            for seed in range(4)
+        }
+        assert len(picks) > 1

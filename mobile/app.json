@@ -12,7 +12,8 @@
       "bundleIdentifier": "app.bestme.mobile",
       "infoPlist": {
         "NSCameraUsageDescription": "BestMe usa la cámara para analizar tus comidas, estimar tu composición corporal y revisar tu técnica al entrenar.",
-        "NSPhotoLibraryUsageDescription": "BestMe accede a tus fotos para que puedas analizar comidas que ya hayas fotografiado."
+        "NSPhotoLibraryUsageDescription": "BestMe accede a tus fotos para que puedas analizar comidas que ya hayas fotografiado.",
+        "NSLocationWhenInUseUsageDescription": "BestMe usa tu ubicación para medir la distancia y el tiempo de tus recorridos (caminata, carrera o ciclismo)."
       }
     },
     "android": {
@@ -24,7 +25,12 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -42,6 +48,20 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "BestMe usa la cámara para el escáner corporal en vivo y el entrenador.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "BestMe usa tu ubicación para medir la distancia y el tiempo de tus recorridos (caminata, carrera o ciclismo)."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
@@ -52,6 +72,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fe821ae3-f987-421c-b89a-bd376991cb4a"
+      }
+    },
+    "owner": "elozz"
   }
 }

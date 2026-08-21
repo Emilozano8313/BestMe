@@ -78,6 +78,58 @@ async def test_unknown_exercise_uses_default_met(
     assert response.json()["calories_burned"] == 164.0
 
 
+async def test_distance_route_uses_speed_based_met(async_client: AsyncClient, auth_headers: dict):
+    """5 km in 1 h -> 5 km/h walking pace -> MET 3.5 -> 3.5 x 82 x 1 = 287."""
+    payload = {
+        "exercise_name": "caminar",
+        "total_reps": 0,
+        "duration_seconds": 3600,
+        "distance_km": 5.0,
+        "sets": [],
+        "analysis_summary": {"source": "recorrido_gps"},
+    }
+    response = await async_client.post("/api/workouts/", headers=auth_headers, json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["calories_burned"] == 287.0
+    assert data["distance_km"] == 5.0
+
+
+async def test_distance_route_without_distance_falls_back_to_flat_met(
+    async_client: AsyncClient, auth_headers: dict
+):
+    """No distance given -> flat MET_DICTIONARY['correr'] (8.3) -> 8.3 x 82 x 0.5 = 340.3."""
+    payload = {
+        "exercise_name": "correr",
+        "total_reps": 0,
+        "duration_seconds": 1800,
+        "sets": [],
+        "analysis_summary": {},
+    }
+    response = await async_client.post("/api/workouts/", headers=auth_headers, json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["calories_burned"] == 340.3
+    assert response.json()["distance_km"] is None
+
+
+async def test_faster_pace_burns_more_calories_per_hour(async_client: AsyncClient, auth_headers: dict):
+    """20 km/h cycling -> MET 8.0, strictly above the <16 km/h tier's MET 4.0."""
+    payload = {
+        "exercise_name": "ciclismo",
+        "total_reps": 0,
+        "duration_seconds": 3600,
+        "distance_km": 20.0,
+        "sets": [],
+        "analysis_summary": {},
+    }
+    response = await async_client.post("/api/workouts/", headers=auth_headers, json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["calories_burned"] == 656.0
+
+
 async def test_get_todays_workouts(async_client: AsyncClient, auth_headers: dict):
     await async_client.post("/api/workouts/", headers=auth_headers, json=SQUAT_SESSION)
 
@@ -114,6 +166,11 @@ async def test_get_workout_plan_home(async_client: AsyncClient, auth_headers: di
     # test_user has weight_kg set, so a calorie estimate must come back.
     assert body["estimated_calories_burned"] is not None
 
+    assert len(body["warmup_exercises"]) > 0
+    assert sum(step["duration_seconds"] for step in body["warmup_exercises"]) == (
+        body["warmup_minutes"] * 60
+    )
+
 
 async def test_get_workout_plan_gym(async_client: AsyncClient, auth_headers: dict):
     response = await async_client.get("/api/workouts/plan?location=gym", headers=auth_headers)
@@ -129,6 +186,33 @@ async def test_get_workout_plan_rejects_bad_location(async_client: AsyncClient, 
 async def test_get_workout_plan_requires_authentication(async_client: AsyncClient):
     response = await async_client.get("/api/workouts/plan?location=home")
     assert response.status_code == 401
+
+
+async def test_get_workout_plan_with_focus_returns_only_that_group(
+    async_client: AsyncClient, auth_headers: dict
+):
+    response = await async_client.get(
+        "/api/workouts/plan?location=gym&focus=push", headers=auth_headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["focus"] == "push"
+    assert len(body["exercises"]) > 0
+    assert all(ex["muscle_group"] == "push" for ex in body["exercises"])
+
+
+async def test_get_workout_plan_rejects_bad_focus(async_client: AsyncClient, auth_headers: dict):
+    response = await async_client.get(
+        "/api/workouts/plan?location=home&focus=neck", headers=auth_headers
+    )
+    assert response.status_code == 422
+
+
+async def test_get_workout_plan_omits_focus_by_default(
+    async_client: AsyncClient, auth_headers: dict
+):
+    response = await async_client.get("/api/workouts/plan?location=home", headers=auth_headers)
+    assert response.json()["focus"] is None
 
 
 async def test_get_workout_plan_requires_a_complete_profile(

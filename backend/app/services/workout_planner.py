@@ -53,6 +53,20 @@ SESSION_SIZE: dict[str, int] = {
 }
 DEFAULT_SESSION_SIZE = SESSION_SIZE["moderate"]
 
+# A focused single-muscle-group session ("chest day") picks up to this many
+# distinct exercises from just that category, instead of one exercise from
+# each of several categories.
+FOCUS_SESSION_SIZE = 4
+
+FOCUS_LABELS: dict[str, str] = {
+    "legs": "piernas",
+    "push": "empuje (pecho, hombro, tríceps)",
+    "pull": "tirón (espalda, bíceps)",
+    "shoulders": "hombros",
+    "core": "core",
+    "full_body": "cuerpo completo",
+}
+
 HOME_EQUIPMENT: frozenset[str] = frozenset({"bodyweight"})
 GYM_EQUIPMENT: frozenset[str] = frozenset(
     {
@@ -85,6 +99,7 @@ EXERCISE_DATABASE: tuple[Exercise, ...] = (
     Exercise("Sentadillas", MuscleGroup.LEGS, frozenset({"bodyweight"}), is_compound=True),
     Exercise("Zancadas", MuscleGroup.LEGS, frozenset({"bodyweight"})),
     Exercise("Puente de glúteo", MuscleGroup.LEGS, frozenset({"bodyweight"})),
+    Exercise("Sentadilla búlgara sin peso", MuscleGroup.LEGS, frozenset({"bodyweight"})),
     Exercise("Sentadilla con barra", MuscleGroup.LEGS, frozenset({"barbell"}), is_compound=True),
     Exercise("Prensa de piernas", MuscleGroup.LEGS, frozenset({"machine"}), is_compound=True),
     Exercise(
@@ -96,6 +111,7 @@ EXERCISE_DATABASE: tuple[Exercise, ...] = (
     # ── Push: chest, front shoulder, triceps ────────────────────────
     Exercise("Flexiones de pecho", MuscleGroup.PUSH, frozenset({"bodyweight"}), is_compound=True),
     Exercise("Fondos en silla", MuscleGroup.PUSH, frozenset({"bodyweight"})),
+    Exercise("Flexiones diamante", MuscleGroup.PUSH, frozenset({"bodyweight"})),
     Exercise(
         "Press de banca con barra",
         MuscleGroup.PUSH,
@@ -112,6 +128,7 @@ EXERCISE_DATABASE: tuple[Exercise, ...] = (
     # ── Pull: back, biceps ───────────────────────────────────────────
     Exercise("Remo invertido en mesa", MuscleGroup.PULL, frozenset({"bodyweight"}), is_compound=True),
     Exercise("Superman", MuscleGroup.PULL, frozenset({"bodyweight"})),
+    Exercise("Buenos días sin peso", MuscleGroup.PULL, frozenset({"bodyweight"})),
     Exercise("Dominadas", MuscleGroup.PULL, frozenset({"pull_up_bar"}), is_compound=True),
     Exercise("Remo con barra", MuscleGroup.PULL, frozenset({"barbell"}), is_compound=True),
     Exercise("Jalón al pecho", MuscleGroup.PULL, frozenset({"cable"}), is_compound=True),
@@ -122,6 +139,8 @@ EXERCISE_DATABASE: tuple[Exercise, ...] = (
     ),
     # ── Shoulders ─────────────────────────────────────────────────────
     Exercise("Flexiones pike", MuscleGroup.SHOULDERS, frozenset({"bodyweight"})),
+    Exercise("Flexiones pike con pies elevados", MuscleGroup.SHOULDERS, frozenset({"bodyweight"})),
+    Exercise("Plancha con toques de hombro", MuscleGroup.SHOULDERS, frozenset({"bodyweight"})),
     Exercise(
         "Press militar con barra", MuscleGroup.SHOULDERS, frozenset({"barbell"}), is_compound=True
     ),
@@ -137,6 +156,7 @@ EXERCISE_DATABASE: tuple[Exercise, ...] = (
     # ── Full body / conditioning finisher ──────────────────────────────
     Exercise("Burpees", MuscleGroup.FULL_BODY, frozenset({"bodyweight"}), is_compound=True),
     Exercise("Escaladores", MuscleGroup.FULL_BODY, frozenset({"bodyweight"})),
+    Exercise("Sentadilla con salto", MuscleGroup.FULL_BODY, frozenset({"bodyweight"})),
     Exercise(
         "Swings con kettlebell", MuscleGroup.FULL_BODY, frozenset({"kettlebell"}), is_compound=True
     ),
@@ -187,12 +207,31 @@ DEFAULT_GOAL_SCHEME = GOAL_SCHEMES["maintain"]
 # sets.
 SESSION_MET = 5.0
 
+@dataclass(frozen=True)
+class WarmupStep:
+    name: str
+    duration_seconds: int
+
+
 WARMUP_MINUTES = 5
+# Fixed dynamic warm-up — same routine regardless of goal or location: it's
+# joint mobility and blood flow, not training stimulus, so there's nothing
+# to tune per profile. Durations sum to WARMUP_MINUTES * 60 exactly.
+WARMUP_ROUTINE: tuple[WarmupStep, ...] = (
+    WarmupStep("Marcha en el sitio", 60),
+    WarmupStep("Círculos de brazos", 30),
+    WarmupStep("Rotación de cadera y tobillos", 30),
+    WarmupStep("Sentadillas sin peso", 90),
+    WarmupStep("Zancadas dinámicas", 90),
+)
 # Rough seconds of working time per set, on top of the rest between sets —
 # used only to estimate session length, not for calorie precision.
 SECONDS_PER_SET = 45
 CARDIO_FINISHER_MINUTES = 15
-CARDIO_FINISHER_NOTE = "Cardio de intensidad moderada: 15-20 minutos (bici, cinta o cuerda)."
+CARDIO_FINISHER_NOTE = (
+    "Cardio de intensidad moderada: 15-20 minutos "
+    "(caminata rápida, bici, cinta o cuerda)."
+)
 
 
 @dataclass(frozen=True)
@@ -209,8 +248,10 @@ class PlannedExercise:
 class WorkoutPlan:
     location: Location
     goal: str
+    focus: Optional[str]
     exercises: tuple[PlannedExercise, ...]
     warmup_minutes: int
+    warmup_exercises: tuple[WarmupStep, ...]
     includes_cardio_finisher: bool
     cardio_finisher_note: Optional[str]
     estimated_duration_minutes: int
@@ -245,6 +286,30 @@ class WorkoutPlanner:
             return None
         return candidates[seed % len(candidates)]
 
+    @staticmethod
+    def _pick_focus_session(
+        category: MuscleGroup, equipment: frozenset[str], seed: int
+    ) -> list[Exercise]:
+        """
+        Choose several distinct exercises, all from the same muscle group —
+        a "chest day" style session instead of one-per-category.
+
+        Rotates which exercises show up via `seed`, but never repeats one
+        within a single session; the session is simply shorter than
+        FOCUS_SESSION_SIZE if the category doesn't have that many options
+        for the given equipment.
+        """
+        candidates = [
+            exercise
+            for exercise in EXERCISE_DATABASE
+            if exercise.muscle_group == category and exercise.equipment.issubset(equipment)
+        ]
+        if not candidates:
+            return []
+        offset = seed % len(candidates)
+        rotated = candidates[offset:] + candidates[:offset]
+        return rotated[:FOCUS_SESSION_SIZE]
+
     @classmethod
     def compute_plan(
         cls,
@@ -254,38 +319,54 @@ class WorkoutPlanner:
         location: str,
         weight_kg: Optional[float] = None,
         seed: Optional[int] = None,
+        focus: Optional[str] = None,
     ) -> WorkoutPlan:
         """
-        Build today's balanced session.
+        Build today's session — a balanced full-body circuit by default, or
+        several exercises from a single muscle group when `focus` is set.
 
         Args:
             goal: one of the FitnessGoal values; unknown values fall back
                   to the "maintain" scheme rather than raising.
             activity_level: one of the ActivityLevel values; unknown values
-                  fall back to a moderate-length session.
+                  fall back to a moderate-length session. Ignored when
+                  `focus` is set — a focus session's length comes from how
+                  many exercises that group actually has, not activity level.
             location: "home" or "gym" — required, raises on anything else.
             weight_kg: used only to estimate calories burned; omitted (or
                   non-positive) skips the estimate rather than guessing.
             seed: rotates exercise picks; defaults to today's ordinal date
                   so the plan varies day to day. Pass an explicit value for
                   reproducible output (tests, previews).
+            focus: one of the MuscleGroup values (e.g. "push" for a chest
+                  day) to get several exercises from just that group instead
+                  of the usual balanced circuit. None (default) = balanced.
         """
         if location not in (Location.HOME.value, Location.GYM.value):
             raise ValueError(f"Ubicación desconocida: {location!r}. Usa 'home' o 'gym'.")
+        if focus is not None and focus not in {group.value for group in MuscleGroup}:
+            raise ValueError(f"Grupo muscular desconocido: {focus!r}.")
 
         scheme = GOAL_SCHEMES.get(goal, DEFAULT_GOAL_SCHEME)
-        session_size = SESSION_SIZE.get(activity_level, DEFAULT_SESSION_SIZE)
         equipment = cls._equipment_for(location)
         effective_seed = date.today().toordinal() if seed is None else seed
 
-        planned: list[PlannedExercise] = []
-        for category in CATEGORY_ORDER[:session_size]:
-            exercise = cls._pick_for_category(category, equipment, effective_seed)
-            if exercise is None:
+        if focus is not None:
+            exercises = cls._pick_focus_session(MuscleGroup(focus), equipment, effective_seed)
+        else:
+            session_size = SESSION_SIZE.get(activity_level, DEFAULT_SESSION_SIZE)
+            exercises = [
+                exercise
+                for category in CATEGORY_ORDER[:session_size]
+                if (exercise := cls._pick_for_category(category, equipment, effective_seed))
+                is not None
                 # No exercise in the database currently leaves a category
                 # empty at either location, but a data change could — skip
                 # rather than crash the whole plan.
-                continue
+            ]
+
+        planned: list[PlannedExercise] = []
+        for exercise in exercises:
             reps_label = f"{scheme.timed_seconds} s" if exercise.is_timed else scheme.reps_label
             planned.append(
                 PlannedExercise(
@@ -318,15 +399,18 @@ class WorkoutPlanner:
             if location == Location.HOME.value
             else "Aprovecha el equipo del gimnasio para más resistencia y variedad."
         )
+        focus_note = f" Sesión enfocada en {FOCUS_LABELS[focus]}." if focus else ""
 
         return WorkoutPlan(
             location=Location(location),
             goal=goal,
+            focus=focus,
             exercises=tuple(planned),
             warmup_minutes=WARMUP_MINUTES,
+            warmup_exercises=WARMUP_ROUTINE,
             includes_cardio_finisher=includes_finisher,
             cardio_finisher_note=CARDIO_FINISHER_NOTE if includes_finisher else None,
             estimated_duration_minutes=estimated_duration,
             estimated_calories_burned=estimated_calories,
-            coach_note=f"{scheme.note} {location_note}",
+            coach_note=f"{scheme.note} {location_note}{focus_note}",
         )

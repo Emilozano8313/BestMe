@@ -78,6 +78,13 @@ class WorkoutSession(Base):
         nullable=True,
     )
 
+    # Distance covered, in km — set for GPS-tracked routes (caminar/correr/ciclismo).
+    # None for set-based strength sessions.
+    distance_km: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
     # Estimated calories burned
     calories_burned: Mapped[float | None] = mapped_column(
         Float,

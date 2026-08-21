@@ -11,7 +11,7 @@
  * should never do that silently.
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,11 +22,15 @@ import {
   Image,
   ScrollView,
   TextInput,
+  useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const COUNTDOWN_SECONDS = 6;
 
 import { palette } from '@/constants/Colors';
 import { Typography, Spacing, BorderRadius } from '@/constants/Theme';
@@ -62,6 +66,13 @@ const EQUATION_LABELS: Record<string, string> = {
 
 export default function ScannerScreen() {
   const { refreshMetabolicProfile } = useAuth();
+  const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  const [permission, requestPermission] = useCameraPermissions();
+  const [facing, setFacing] = useState<CameraType>('front');
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const cameraRef = useRef<CameraView>(null);
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -75,31 +86,16 @@ export default function ScannerScreen() {
     setPreview(null);
     setConfirmed(null);
     setBodyFatDraft('');
+    setCountdown(null);
   }, []);
 
-  const handleCapture = useCallback(async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permiso denegado', 'Se requiere acceso a la cámara.');
-      return;
-    }
-
-    const picked = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [3, 4],
-      quality: 0.8,
-    });
-    if (picked.canceled) return;
-
+  const processImage = useCallback(async (uri: string) => {
     setIsAnalyzing(true);
     setPreview(null);
     setConfirmed(null);
+    setImageUri(uri);
 
     try {
-      const uri = picked.assets[0].uri;
-      setImageUri(uri);
-
       const resized = await ImageManipulator.manipulateAsync(
         uri,
         [{ resize: { height: 1024 } }],
@@ -120,6 +116,35 @@ export default function ScannerScreen() {
       setIsAnalyzing(false);
     }
   }, []);
+
+  const handleShutter = useCallback(async () => {
+    if (!cameraRef.current) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
+      if (photo?.uri) {
+        await processImage(photo.uri);
+      }
+    } catch {
+      Alert.alert('Error', 'No se pudo tomar la foto. Intenta de nuevo.');
+    }
+  }, [processImage]);
+
+  // Self-timer: lets you prop the phone up and step back into the silhouette
+  // before the shutter fires, instead of holding it yourself.
+  const startCountdown = useCallback(() => {
+    setCountdown(COUNTDOWN_SECONDS);
+  }, []);
+
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown === 0) {
+      setCountdown(null);
+      void handleShutter();
+      return;
+    }
+    const timer = setTimeout(() => setCountdown((c) => (c ?? 1) - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown, handleShutter]);
 
   const handleConfirm = useCallback(async () => {
     if (!preview) return;
@@ -165,7 +190,7 @@ export default function ScannerScreen() {
     <View style={styles.screen}>
       <LinearGradient colors={[palette.dark900, palette.dark800]} style={styles.gradient}>
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + Spacing.lg }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -177,23 +202,76 @@ export default function ScannerScreen() {
             </Text>
           </View>
 
-          {/* Camera area / preview image */}
-          <View style={styles.cameraContainer}>
+          {/* Camera area / preview image — fills the screen while framing,
+              settles to a fixed height once there's a result to scroll past. */}
+          <View
+            style={[
+              styles.cameraContainer,
+              { height: imageUri ? 420 : Math.max(420, windowHeight - 340) },
+            ]}
+          >
             {!imageUri ? (
-              <View style={styles.placeholderBox}>
-                <View style={styles.silhouetteContainer}>
-                  <View style={styles.silhouetteHead} />
-                  <View style={styles.silhouetteBody} />
-                  <View style={styles.silhouetteLegs} />
+              !permission ? (
+                <View style={styles.placeholderBox} />
+              ) : !permission.granted ? (
+                <View style={styles.placeholderBox}>
+                  <Ionicons name="camera-outline" size={40} color={palette.gray400} />
+                  <Text style={styles.instructionText}>
+                    BestMe necesita acceso a la cámara para el escáner corporal.
+                  </Text>
+                  <Pressable style={styles.permissionBtn} onPress={requestPermission}>
+                    <Text style={styles.permissionBtnText}>Permitir cámara</Text>
+                  </Pressable>
                 </View>
-                <Text style={styles.instructionText}>
-                  Alinea tu cuerpo con la silueta. Ropa ajustada, buena luz y de frente
-                  o de perfil mejoran mucho la precisión.
-                </Text>
-                <Pressable style={styles.captureBtn} onPress={handleCapture}>
-                  <Ionicons name="camera" size={32} color={palette.dark900} />
-                </Pressable>
-              </View>
+              ) : (
+                <View style={StyleSheet.absoluteFill}>
+                  <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} />
+
+                  {/* Silhouette guide, overlaid on the live feed */}
+                  <View style={styles.silhouetteOverlay} pointerEvents="none">
+                    <View style={styles.silhouetteContainer}>
+                      <View style={styles.silhouetteHead} />
+                      <View style={styles.silhouetteBody} />
+                      <View style={styles.silhouetteLegs} />
+                    </View>
+                  </View>
+
+                  {countdown !== null ? (
+                    <View style={styles.countdownOverlay} pointerEvents="none">
+                      <Text style={styles.countdownText}>{countdown}</Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={styles.instructionTextOverlay}>
+                    Alinea tu cuerpo con la silueta. Apoya el teléfono, inicia el
+                    autodisparador y da unos pasos atrás.
+                  </Text>
+
+                  <View style={styles.cameraControls}>
+                    <Pressable
+                      style={styles.flipBtn}
+                      onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
+                    >
+                      <Ionicons name="camera-reverse-outline" size={22} color={palette.white} />
+                    </Pressable>
+
+                    <Pressable
+                      style={styles.captureBtn}
+                      onPress={countdown === null ? startCountdown : () => setCountdown(null)}
+                    >
+                      {countdown !== null ? (
+                        <Ionicons name="close" size={30} color={palette.dark900} />
+                      ) : (
+                        <Ionicons name="timer-outline" size={30} color={palette.dark900} />
+                      )}
+                    </Pressable>
+
+                    <Pressable style={styles.flipBtn} onPress={handleShutter}>
+                      <Ionicons name="camera" size={22} color={palette.white} />
+                    </Pressable>
+                  </View>
+                </View>
+              )
             ) : (
               <View style={styles.imageBox}>
                 <Image source={{ uri: imageUri }} style={styles.previewImage} />
@@ -388,7 +466,6 @@ const styles = StyleSheet.create({
   subtitle: { color: palette.gray300, fontSize: Typography.size.md, marginTop: 4 },
 
   cameraContainer: {
-    height: 420,
     backgroundColor: '#0a0f18',
     borderRadius: BorderRadius.xl,
     overflow: 'hidden',
@@ -403,6 +480,70 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     marginBottom: Spacing['2xl'],
     lineHeight: 22,
+  },
+  instructionTextOverlay: {
+    position: 'absolute',
+    bottom: 110,
+    left: Spacing.lg,
+    right: Spacing.lg,
+    color: palette.white,
+    textAlign: 'center',
+    lineHeight: 20,
+    fontSize: Typography.size.sm,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 6,
+  },
+  permissionBtn: {
+    backgroundColor: palette.emerald,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+  },
+  permissionBtnText: { color: palette.dark900, fontWeight: Typography.weight.bold },
+
+  silhouetteOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countdownOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  countdownText: {
+    color: palette.white,
+    fontSize: 96,
+    fontWeight: Typography.weight.bold,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 12,
+  },
+  cameraControls: {
+    position: 'absolute',
+    bottom: Spacing.xl,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xl,
+  },
+  flipBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   captureBtn: {
     width: 70,
@@ -419,7 +560,7 @@ const styles = StyleSheet.create({
   },
 
   // Silhouette guide
-  silhouetteContainer: { alignItems: 'center', opacity: 0.2 },
+  silhouetteContainer: { alignItems: 'center', opacity: 0.45 },
   silhouetteHead: {
     width: 60,
     height: 80,

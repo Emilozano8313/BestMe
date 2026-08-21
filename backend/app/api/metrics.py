@@ -104,7 +104,7 @@ async def _upsert_today_snapshot(
     Only touches the target_* columns — the consumed macros
     (protein_g / carbs_g / fat_g) belong to the meals log.
     """
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     result = await db.execute(
         select(DailyMetric).where(
             DailyMetric.user_id == user.id,
@@ -143,7 +143,7 @@ async def get_today_summary(
     Used by the Home Dashboard and the Nutrition screen so neither has to
     re-sum the meals list client-side.
     """
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     result = await db.execute(
         select(DailyMetric).where(
             DailyMetric.user_id == current_user.id,
@@ -251,7 +251,7 @@ async def get_history(
     omitted, so the client can plot a continuous time axis without having to
     reconstruct the missing dates itself.
     """
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     start = today - timedelta(days=days - 1)
 
     metrics_rows = (
@@ -353,8 +353,8 @@ async def log_weight(
     """
     _validate_user_has_profile(current_user)
 
-    target_day = payload.date or date.today()
-    if target_day > date.today():
+    target_day = payload.date or datetime.now(timezone.utc).date()
+    if target_day > datetime.now(timezone.utc).date():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No se puede registrar un peso en el futuro.",
@@ -362,7 +362,7 @@ async def log_weight(
 
     # The current weight is the profile weight; historical backfills only
     # annotate that day and must not rewrite today's profile.
-    if target_day == date.today():
+    if target_day == datetime.now(timezone.utc).date():
         current_user.weight_kg = payload.weight_kg
         current_user.updated_at = datetime.now(timezone.utc)
         db.add(current_user)
@@ -382,7 +382,7 @@ async def log_weight(
         db.add(metric)
 
     metric.weight_kg = payload.weight_kg
-    if target_day == date.today():
+    if target_day == datetime.now(timezone.utc).date():
         metric.bmr = profile.bmr
         metric.tdee = profile.tdee
         metric.calorie_target = profile.calorie_target
@@ -420,7 +420,7 @@ async def save_daily_snapshot(
     await db.commit()
 
     return SnapshotResponse(
-        date=date.today(),
+        date=datetime.now(timezone.utc).date(),
         bmr=profile.bmr,
         tdee=profile.tdee,
         calorie_target=profile.calorie_target,

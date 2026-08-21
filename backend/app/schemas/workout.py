@@ -28,6 +28,9 @@ class WorkoutSessionCreate(BaseModel):
     sets: List[WorkoutSet] = Field(default_factory=list)
     total_reps: int = Field(..., ge=0, description="Total repetitions performed")
     duration_seconds: int = Field(..., ge=0, description="Total active duration in seconds")
+    distance_km: Optional[float] = Field(
+        None, ge=0, description="Distance covered, in km — for GPS-tracked routes"
+    )
     analysis_summary: dict = Field(default_factory=dict, description="Summary from Edge AI")
     started_at: Optional[datetime] = Field(
         None,
@@ -46,6 +49,7 @@ class WorkoutSessionResponse(BaseModel):
     total_reps: int
     avg_form_score: Optional[float]
     duration_seconds: Optional[int]
+    distance_km: Optional[float]
     calories_burned: float
     analysis_summary: dict
     started_at: datetime
@@ -67,11 +71,19 @@ class PlannedExerciseSchema(BaseModel):
     is_compound: bool
 
 
+class WarmupStepSchema(BaseModel):
+    """One step of the fixed dynamic warm-up, shown before the main session."""
+    name: str
+    duration_seconds: int
+
+
 class WorkoutPlanResponse(BaseModel):
     """A balanced session generated from the user's profile and location."""
     location: str
     goal: str
+    focus: Optional[str] = None
     warmup_minutes: int
+    warmup_exercises: List[WarmupStepSchema]
     exercises: List[PlannedExerciseSchema]
     includes_cardio_finisher: bool
     cardio_finisher_note: Optional[str] = None

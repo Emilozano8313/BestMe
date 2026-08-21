@@ -1,8 +1,8 @@
 # 📋 BestMe — Status del Proyecto
 
-> **Última actualización:** 2026-08-15
-> **Versión:** 0.5.0
-> **Estado:** Backend funcional y verificado · Frontend conectado a datos reales · Rutinas gratuitas sin IA · Falta cámara real e IA con clave
+> **Última actualización:** 2026-08-16
+> **Versión:** 0.7.0
+> **Estado:** Backend desplegado en Railway (Postgres en la nube) · App instalable vía EAS (dev + preview) · Modo offline con cola de sincronización · Falta clave de Claude para IA real
 
 ---
 
@@ -10,16 +10,20 @@
 
 | Componente | Estado | Notas |
 |------------|--------|-------|
-| Backend (FastAPI) | ✅ Funcional | 20 endpoints, arranca en Windows y en Docker |
-| Base de Datos (PostgreSQL) | ✅ 2 migraciones | Tipos portables: los tests corren en SQLite |
+| Backend (FastAPI) | ✅ Desplegado | En producción en Railway: `backend-production-4fe1.up.railway.app` |
+| Base de Datos (PostgreSQL) | ✅ En la nube | Postgres gestionado por Railway; migraciones corren al arrancar el contenedor |
 | Autenticación | ✅ Funcional | JWT + refresh automático, sesión persistente |
-| Rutinas de entrenamiento (`WorkoutPlanner`) | ✅ Funcional, gratis | Motor de reglas, sin llamada a Claude — funciona sin `ANTHROPIC_API_KEY` |
-| Motor Metabólico | ✅ Funcional | Mifflin-St Jeor ⇄ Katch-McArdle verificado |
+| Rutinas de entrenamiento (`WorkoutPlanner`) | ✅ Funcional, gratis | Motor de reglas + modo enfoque por grupo muscular + calentamiento guiado |
+| Cronómetro de rutina | ✅ Funcional | Guía paso a paso con cronómetro, guarda duración y calorías reales al terminar |
+| Recorrido (GPS) | ✅ Funcional | Caminar/correr/ciclismo: mide km y tiempo por GPS, MET según el ritmo real |
+| Motor Metabólico | ✅ Funcional | Mifflin-St Jeor ⇄ Katch-McArdle, déficit/superávit por objetivo |
 | Nutrición IA | ⚠️ Falta la clave | Código listo (Claude Sonnet 5); sin `ANTHROPIC_API_KEY` devuelve datos de ejemplo marcados |
-| Escáner Corporal | ⚠️ Falta la clave | Igual que arriba. Flujo de confirmación implementado |
-| Entrenador Biomecánico | ❌ **Simulado** | `train.tsx` genera landmarks falsos. No hay cámara ni modelo de pose |
-| Tests | ✅ 57 pasando | Antes 3 de 4 archivos ni siquiera arrancaban |
-| Despliegue en la nube | ⬜ Pendiente | Config endurecida; falta desplegar |
+| Escáner Corporal | ⚠️ Falta la clave | Cámara en vivo + autodisparador funcionando; análisis requiere la clave |
+| Entrenador Biomecánico | ❌ Pendiente | Cámara con IA de pose sigue sin implementar (requiere Development Build) |
+| Modo offline | ✅ Funcional | Caché de lecturas + cola de escrituras (comidas, entrenos, peso); sincroniza solo al reconectar |
+| Ícono / identidad visual | ✅ Funcional | Monograma "B" propio, ya no es la plantilla de Expo |
+| Tests | ✅ 173 backend / 24 frontend | |
+| Despliegue en la nube | ✅ Hecho | Railway (backend + Postgres); app instalable vía enlace EAS |
 
 ---
 
