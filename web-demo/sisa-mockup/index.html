@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maqueta — Perfil de estudiante (datos ficticios)</title>
+<style>
+  :root{
+    --azul: #3d5875;
+    --azul-osc: #2f4560;
+    --verde: #2f9e7a;
+    --verde-osc: #26805f;
+    --gris: #6b7280;
+    --borde: #cfd8e3;
+    --fondo: #eef1f4;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family: Arial, Helvetica, sans-serif;
+    background:var(--fondo);
+    color:#1f2937;
+  }
+  .disclaimer{
+    background:#fff3cd;
+    color:#7a5b00;
+    padding:10px 16px;
+    font-size:13px;
+    text-align:center;
+    border-bottom:1px solid #e5c76b;
+  }
+  header{
+    background:var(--azul);
+    color:#fff;
+    padding:20px 16px 14px;
+  }
+  header h1{
+    margin:0 0 10px;
+    font-size:22px;
+    font-weight:400;
+  }
+  header .links{
+    display:flex;
+    gap:24px;
+    font-size:14px;
+    opacity:.95;
+  }
+  main{
+    max-width:640px;
+    margin:16px auto;
+    padding:0 16px 40px;
+  }
+  .card{
+    background:#fff;
+    border:1px solid var(--borde);
+    border-radius:4px;
+    margin-bottom:20px;
+    overflow:hidden;
+  }
+  .card > .card-header{
+    background:var(--azul);
+    color:#fff;
+    padding:12px 16px;
+    font-size:15px;
+  }
+  .card > .card-header.gris{
+    background:#6b7280;
+  }
+  .banner{
+    height:110px;
+    background:linear-gradient(135deg,#8a3b3b,#b5654f);
+    position:relative;
+  }
+  .profile-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:0 16px;
+    margin-top:-30px;
+  }
+  .avatar{
+    width:64px;
+    height:64px;
+    border-radius:4px;
+    background:#dbe4f0;
+    border:3px solid #fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:28px;
+    color:#7a92b8;
+  }
+  .profile-name{
+    padding-top:10px;
+  }
+  .profile-name input{
+    font-size:17px;
+    font-weight:bold;
+    color:#111827; /* negro, no rojo */
+    border:none;
+    background:transparent;
+    width:100%;
+    padding:2px 0;
+  }
+  .profile-name .matricula{
+    font-size:13px;
+    color:#111827;
+    padding:10px 16px 6px;
+  }
+  .profile-name .matricula input{
+    font-weight:normal;
+    font-size:13px;
+  }
+  .field-block{
+    padding:16px;
+  }
+  .field-block .label{
+    font-size:13px;
+    font-weight:bold;
+    color:#374151;
+    margin:14px 0 6px;
+  }
+  .field-block .label:first-child{margin-top:0;}
+  .field-block input, .field-block select{
+    width:100%;
+    padding:10px;
+    border:1px solid var(--borde);
+    border-radius:3px;
+    background:#f3f5f7;
+    font-size:14px;
+    color:#111827;
+  }
+  .carrera{
+    text-align:center;
+    padding:10px 0 4px;
+  }
+  .carrera .label{
+    font-size:13px;
+    font-weight:bold;
+    color:#374151;
+  }
+  .carrera input{
+    text-align:center;
+    font-size:18px;
+    color:var(--azul-osc);
+    border:none;
+    background:transparent;
+    width:100%;
+    font-weight:600;
+  }
+  .grid2{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+  }
+  .estado-activo input{
+    color:#166534;
+    font-weight:bold;
+    background:#eafaf0;
+    border-color:#8fd6ac;
+  }
+  footer{
+    text-align:center;
+    font-size:12px;
+    color:var(--gris);
+    padding-bottom:24px;
+  }
+</style>
+</head>
+<body>
+
+<div class="disclaimer">
+  Maqueta de ejemplo con datos 100% ficticios — no corresponde a ninguna persona ni institución real. Todos los campos son editables.
+</div>
+
+<header>
+  <h1>Sistema Integral de Servicios Académicos | SISA (maqueta)</h1>
+  <div class="links">
+    <span>📄 Manual de asesorías</span>
+    <span>⏻ Salir</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="card">
+    <div class="card-header">Mi perfil</div>
+    <div class="banner"></div>
+    <div class="profile-row">
+      <div class="avatar">👤</div>
+    </div>
+    <div class="profile-name">
+      <input id="nombre-completo" type="text" value="Estudiante Ejemplo Ficticio">
+    </div>
+    <div class="matricula">
+      Matrícula: <input id="matricula" type="text" value="20253DS099" style="display:inline-block;width:auto;">
+    </div>
+
+    <div class="card-header gris">Información Académica</div>
+    <div class="carrera">
+      <div class="label">Carrera:</div>
+      <input id="carrera" type="text" value="Desarrollo de Software Multiplataforma">
+    </div>
+
+    <div class="field-block">
+      <div class="grid2">
+        <div>
+          <div class="label">Cuatrimestre / Grupo:</div>
+          <input id="cuatri-grupo" type="text" value="4°C">
+        </div>
+        <div>
+          <div class="label">Estado académico:</div>
+          <input id="estado-academico" type="text" value="Activo" class="estado-activo-input">
+        </div>
+      </div>
+
+      <div class="label">Generación Ingreso:</div>
+      <input id="gen-ingreso" type="text" value="No. 43 SEPTIEMBRE-2025 / AGOSTO-2026">
+
+      <div class="label">Generación Egreso:</div>
+      <input id="gen-egreso" type="text" value="No. 43 SEPTIEMBRE-2025 / AGOSTO-2026">
+
+      <div class="label">Plan de estudios:</div>
+      <input id="plan-estudios" type="text" value="DS 2025 - SEPTIEMBRE">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header gris">Información Personal (ficticia)</div>
+    <div class="field-block">
+      <div class="label">Nombre:</div>
+      <input type="text" value="Estudiante">
+
+      <div class="label">Primer apellido:</div>
+      <input type="text" value="Ejemplo">
+
+      <div class="label">Segundo apellido:</div>
+      <input type="text" value="Ficticio">
+
+      <div class="label">Estado de nacimiento:</div>
+      <input type="text" value="Ciudad Ejemplo">
+
+      <div class="label">Municipio de nacimiento:</div>
+      <input type="text" value="Municipio Ejemplo">
+
+      <div class="label">Estado civil:</div>
+      <input type="text" value="Soltero(a)">
+
+      <div class="label">CURP (ficticia):</div>
+      <input type="text" value="XXXX000101HDFXXX00">
+
+      <div class="label">Correo electrónico:</div>
+      <input type="text" value="estudiante.ejemplo@correo-ficticio.com">
+    </div>
+  </div>
+
+  <footer>
+    Página de práctica generada como ejemplo de maquetación con IA. Todos los datos son inventados y pueden editarse libremente en este formulario.
+  </footer>
+
+</main>
+
+<script>
+  // Resalta en verde el campo de estado académico cuando dice "Activo"
+  const estado = document.getElementById('estado-academico');
+  function syncEstado(){
+    const val = estado.value.trim().toLowerCase();
+    if(val.startsWith('activo')){
+      estado.style.color = '#166534';
+      estado.style.background = '#eafaf0';
+      estado.style.borderColor = '#8fd6ac';
+      estado.style.fontWeight = 'bold';
+    } else {
+      estado.style.color = '';
+      estado.style.background = '';
+      estado.style.borderColor = '';
+      estado.style.fontWeight = '';
+    }
+  }
+  estado.addEventListener('input', syncEstado);
+  syncEstado();
+</script>
+
+</body>
+</html>
