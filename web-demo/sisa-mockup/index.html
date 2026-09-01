@@ -3,181 +3,149 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Maqueta — Perfil de estudiante (datos ficticios)</title>
+<title>SISA</title>
 <style>
   :root{
-    --azul: #3d5875;
-    --azul-osc: #2f4560;
-    --verde: #2f9e7a;
-    --verde-osc: #26805f;
-    --gris: #6b7280;
-    --borde: #cfd8e3;
-    --fondo: #eef1f4;
+    --bg: #eef1f4;
+    --surface: #ffffff;
+    --input-fill: #eef0f1;
+    --border: #cfd8e3;
+    --ink: #16202c;
+    --ink-dim: #55606d;
+    --header: #3d5875;
+    --header-ink: #f3f6fa;
+    --subhead: #6c7a89;
+    --subhead-ink: #ffffff;
+    --green-label: #1f7a4d;
+    --green-border: #3fa06f;
+    --modificar: #4fb99f;
+    --modificar-ink: #ffffff;
+    --band-a: #8a4436;
+    --band-b: #b96b4c;
+    --warn-bg: #fdf3d8;
+    --warn-ink: #7a5b00;
+    --warn-border: #ecd693;
+    --ok-bg: #e4f5ec;
+    --ok-ink: #1b7a4d;
+    --ok-border: #a6dcbf;
   }
-  *{box-sizing:border-box;}
+  *{ box-sizing:border-box; }
   body{
     margin:0;
-    font-family: Arial, Helvetica, sans-serif;
-    background:var(--fondo);
-    color:#1f2937;
+    background:var(--bg);
+    color:var(--ink);
+    font-family: "IBM Plex Sans", Arial, Helvetica, sans-serif;
   }
+  .mono{ font-family:"IBM Plex Mono", Consolas, monospace; font-variant-numeric:tabular-nums; }
+
   .disclaimer{
-    background:#fff3cd;
-    color:#7a5b00;
-    padding:10px 16px;
+    background:var(--warn-bg);
+    color:var(--warn-ink);
+    border-bottom:1px solid var(--warn-border);
+    padding:10px 20px;
     font-size:13px;
     text-align:center;
-    border-bottom:1px solid #e5c76b;
+    line-height:1.5;
   }
-  header{
-    background:var(--azul);
-    color:#fff;
-    padding:20px 16px 14px;
+
+  header.app{ background:var(--header); color:var(--header-ink); }
+  header.app .inner{ max-width:560px; margin:0 auto; padding:18px 20px 14px; position:relative; }
+  header.app .menu{
+    position:absolute; top:18px; right:20px;
+    width:38px; height:34px; border-radius:5px;
+    background:var(--modificar); color:var(--modificar-ink);
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px;
   }
-  header h1{
-    margin:0 0 10px;
-    font-size:22px;
-    font-weight:400;
+  header.app h1{ margin:0 46px 12px 0; font-size:19px; font-weight:600; line-height:1.3; text-wrap:balance; }
+  header.app .links{ display:flex; gap:22px; font-size:13px; opacity:.92; }
+
+  main{ max-width:560px; margin:0 auto; padding:20px 20px 48px; }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:6px; margin-bottom:18px; overflow:hidden; }
+  .card-header{ background:var(--header); color:var(--header-ink); padding:11px 16px; font-size:14px; }
+  .card-header.sub{ background:var(--subhead); color:var(--subhead-ink); }
+
+  .band{
+    height:100px;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,.08) 0 10px, transparent 10px 34px),
+      linear-gradient(160deg, var(--band-a), var(--band-b));
   }
-  header .links{
-    display:flex;
-    gap:24px;
-    font-size:14px;
-    opacity:.95;
-  }
-  main{
-    max-width:640px;
-    margin:16px auto;
-    padding:0 16px 40px;
-  }
-  .card{
-    background:#fff;
-    border:1px solid var(--borde);
-    border-radius:4px;
-    margin-bottom:20px;
-    overflow:hidden;
-  }
-  .card > .card-header{
-    background:var(--azul);
-    color:#fff;
-    padding:12px 16px;
-    font-size:15px;
-  }
-  .card > .card-header.gris{
-    background:#6b7280;
-  }
-  .banner{
-    height:110px;
-    background:linear-gradient(135deg,#8a3b3b,#b5654f);
-    position:relative;
-  }
-  .profile-row{
-    display:flex;
-    align-items:center;
-    gap:14px;
-    padding:0 16px;
-    margin-top:-30px;
-  }
+  .profile-row{ display:flex; align-items:flex-end; gap:14px; padding:0 16px; margin-top:-30px; }
   .avatar{
-    width:64px;
-    height:64px;
-    border-radius:4px;
-    background:#dbe4f0;
-    border:3px solid #fff;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-size:28px;
-    color:#7a92b8;
+    width:60px; height:60px; border-radius:4px;
+    background:var(--input-fill); border:3px solid var(--surface);
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px; color:var(--ink-dim); flex:none;
   }
-  .profile-name{
-    padding-top:10px;
+  .id-block{ padding:10px 16px 16px; }
+  .id-block input{
+    border:none; background:transparent; color:var(--ink);
+    font-weight:600; font-size:17px; width:100%; padding:2px 0;
   }
-  .profile-name input{
-    font-size:17px;
-    font-weight:bold;
-    color:#111827; /* negro, no rojo */
-    border:none;
-    background:transparent;
-    width:100%;
-    padding:2px 0;
+  .id-block .matricula-row{ display:flex; align-items:center; gap:6px; margin-top:2px; }
+  .id-block .matricula-row input{ font-weight:400; font-size:14px; width:150px; }
+
+  .plain-field{ padding:14px 16px; border-bottom:1px solid var(--border); }
+  .plain-field:last-child{ border-bottom:none; }
+  .plain-field .label{ font-size:13px; font-weight:700; color:var(--ink); margin-bottom:6px; }
+  .plain-field.carrera{ text-align:center; }
+  .plain-field.carrera .label{ text-align:center; }
+  .plain-field.carrera input{
+    text-align:center; font-size:20px; font-weight:600; color:var(--header);
+    border:none; background:transparent; width:100%; padding:2px 0;
   }
-  .profile-name .matricula{
-    font-size:13px;
-    color:#111827;
-    padding:10px 16px 6px;
+  .plain-field input, .plain-field select{
+    width:100%; border:none; background:transparent; color:var(--ink); font-size:15px; padding:0;
   }
-  .profile-name .matricula input{
-    font-weight:normal;
-    font-size:13px;
+  .plain-field.two{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .plain-field.two > div .label{ margin-bottom:6px; }
+
+  .status-pill{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:5px 10px; border-radius:20px;
+    border:1px solid var(--ok-border); background:var(--ok-bg); color:var(--ok-ink);
+    font-size:14px; font-weight:600;
   }
-  .field-block{
-    padding:16px;
+  .status-pill.inactive{ border-color:var(--warn-border); background:var(--warn-bg); color:var(--warn-ink); }
+  .status-pill .dot{ width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .status-pill select{ border:none; background:transparent; color:inherit; font-weight:600; font-size:14px; padding:0; }
+
+  .field-block{ padding:16px; }
+  .green-label{ font-size:13px; font-weight:700; color:var(--green-label); margin:14px 0 6px; }
+  .green-label:first-child{ margin-top:0; }
+  .field-block input:not([type=radio]){
+    width:100%; padding:10px 11px; border:1px solid var(--green-border);
+    border-radius:3px; background:var(--input-fill); color:var(--ink); font-size:14px;
   }
-  .field-block .label{
-    font-size:13px;
-    font-weight:bold;
-    color:#374151;
-    margin:14px 0 6px;
+  .field-block input:focus{ outline:2px solid var(--modificar); outline-offset:1px; }
+  .row.two{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .sexo-row{ display:flex; gap:24px; align-items:center; margin-top:4px; font-size:14px; }
+  .sexo-row label{ display:flex; align-items:center; gap:6px; }
+
+  .modificar-btn{
+    display:block; margin:18px auto 4px;
+    background:var(--modificar); color:var(--modificar-ink);
+    border:none; border-radius:20px; padding:11px 32px;
+    font-size:14px; font-weight:600; cursor:pointer;
   }
-  .field-block .label:first-child{margin-top:0;}
-  .field-block input, .field-block select{
-    width:100%;
-    padding:10px;
-    border:1px solid var(--borde);
-    border-radius:3px;
-    background:#f3f5f7;
-    font-size:14px;
-    color:#111827;
-  }
-  .carrera{
-    text-align:center;
-    padding:10px 0 4px;
-  }
-  .carrera .label{
-    font-size:13px;
-    font-weight:bold;
-    color:#374151;
-  }
-  .carrera input{
-    text-align:center;
-    font-size:18px;
-    color:var(--azul-osc);
-    border:none;
-    background:transparent;
-    width:100%;
-    font-weight:600;
-  }
-  .grid2{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:12px;
-  }
-  .estado-activo input{
-    color:#166534;
-    font-weight:bold;
-    background:#eafaf0;
-    border-color:#8fd6ac;
-  }
-  footer{
-    text-align:center;
-    font-size:12px;
-    color:var(--gris);
-    padding-bottom:24px;
-  }
+  .modificar-btn:hover{ filter:brightness(1.05); }
+
+  footer.note{ text-align:center; font-size:12px; color:var(--ink-dim); padding:6px 20px 8px; line-height:1.6; }
 </style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 </head>
 <body>
 
-<div class="disclaimer">
-  Maqueta de ejemplo con datos 100% ficticios — no corresponde a ninguna persona ni institución real. Todos los campos son editables.
-</div>
-
-<header>
-  <h1>Sistema Integral de Servicios Académicos | SISA (maqueta)</h1>
-  <div class="links">
-    <span>📄 Manual de asesorías</span>
-    <span>⏻ Salir</span>
+<header class="app">
+  <div class="inner">
+    <div class="menu">☰</div>
+    <h1>Sistema Integral de Servicios Académicos | SISA</h1>
+    <div class="links">
+      <span>📄 Manual de asesorías</span>
+      <span>⏻ Salir</span>
+    </div>
   </div>
 </header>
 
@@ -185,101 +153,160 @@
 
   <div class="card">
     <div class="card-header">Mi perfil</div>
-    <div class="banner"></div>
-    <div class="profile-row">
-      <div class="avatar">👤</div>
-    </div>
-    <div class="profile-name">
-      <input id="nombre-completo" type="text" value="Estudiante Ejemplo Ficticio">
-    </div>
-    <div class="matricula">
-      Matrícula: <input id="matricula" type="text" value="20253DS099" style="display:inline-block;width:auto;">
+    <div class="band"></div>
+    <div class="profile-row"><div class="avatar">👤</div></div>
+    <div class="id-block">
+      <input id="nombre" type="text" value="Estudiante Ejemplo Ficticio">
+      <div class="matricula-row">
+        <input id="matricula" class="mono" type="text" value="20253DS099">
+      </div>
     </div>
 
-    <div class="card-header gris">Información Académica</div>
-    <div class="carrera">
+    <div class="card-header sub">Información Académica</div>
+
+    <div class="plain-field carrera">
       <div class="label">Carrera:</div>
       <input id="carrera" type="text" value="Desarrollo de Software Multiplataforma">
     </div>
 
-    <div class="field-block">
-      <div class="grid2">
-        <div>
-          <div class="label">Cuatrimestre / Grupo:</div>
-          <input id="cuatri-grupo" type="text" value="4°C">
-        </div>
-        <div>
-          <div class="label">Estado académico:</div>
-          <input id="estado-academico" type="text" value="Activo" class="estado-activo-input">
-        </div>
+    <div class="plain-field two">
+      <div>
+        <div class="label">Cuatrimestre:</div>
+        <input id="cuatri" type="text" value="4">
       </div>
+      <div>
+        <div class="label">Grupo:</div>
+        <input id="grupo" type="text" value="C">
+      </div>
+    </div>
 
+    <div class="plain-field">
       <div class="label">Generación Ingreso:</div>
-      <input id="gen-ingreso" type="text" value="No. 43 SEPTIEMBRE-2025 / AGOSTO-2026">
+      <input id="gen-in" type="text" value="No. 43 SEPTIEMBRE-2025 / AGOSTO-2026">
+    </div>
 
+    <div class="plain-field">
       <div class="label">Generación Egreso:</div>
-      <input id="gen-egreso" type="text" value="No. 43 SEPTIEMBRE-2025 / AGOSTO-2026">
+      <input id="gen-out" type="text" value="No. 43 SEPTIEMBRE-2025 / AGOSTO-2026">
+    </div>
 
+    <div class="plain-field">
       <div class="label">Plan de estudios:</div>
-      <input id="plan-estudios" type="text" value="DS 2025 - SEPTIEMBRE">
+      <input id="plan" type="text" value="DS 2025 - SEPTIEMBRE">
+    </div>
+
+    <div class="plain-field">
+      <div class="label">Estado académico:</div>
+      <div class="status-pill" id="estado-pill">
+        <span class="dot"></span>
+        <select id="estado">
+          <option value="Activo" selected>Activo</option>
+          <option value="Baja temporal">Baja temporal</option>
+          <option value="Baja definitiva">Baja definitiva</option>
+          <option value="Egresado">Egresado</option>
+        </select>
+      </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header gris">Información Personal (ficticia)</div>
+    <div class="card-header sub">Información Personal</div>
     <div class="field-block">
-      <div class="label">Nombre:</div>
-      <input type="text" value="Estudiante">
+      <div class="row two">
+        <div><div class="green-label">Nombre:</div><input type="text" value="Emiliano"></div>
+        <div><div class="green-label">Primer apellido:</div><input type="text" value="Lozano"></div>
+      </div>
+      <div class="row two">
+        <div><div class="green-label">Segundo apellido:</div><input type="text" value="Villafaña"></div>
+        <div><div class="green-label">Estado civil:</div><input type="text" value="Soltero(a)"></div>
+      </div>
+      <div class="row two">
+        <div><div class="green-label">Estado nacimiento:</div><input type="text" value="Guerrero"></div>
+        <div><div class="green-label">Municipio nacimiento:</div><input type="text" value="Acapulco de Juarez"></div>
+      </div>
+      <div class="row two">
+        <div><div class="green-label">CURP:</div><input class="mono" type="text" value="XXXX000101HDFXXX00"></div>
+        <div><div class="green-label">Número IMSS:</div><input class="mono" type="text" value="00000000000"></div>
+      </div>
 
-      <div class="label">Primer apellido:</div>
-      <input type="text" value="Ejemplo">
+      <div class="green-label">Sexo:</div>
+      <div class="sexo-row">
+        <label><input type="radio" name="sexo" checked style="width:auto;"> Masculino</label>
+        <label><input type="radio" name="sexo" style="width:auto;"> Femenino</label>
+      </div>
 
-      <div class="label">Segundo apellido:</div>
-      <input type="text" value="Ficticio">
+      <div class="row two" style="margin-top:14px;">
+        <div><div class="green-label">Fecha de nacimiento:</div><input type="text" value="01/01/2007"></div>
+        <div><div class="green-label">Edad:</div><input type="text" value="18"></div>
+      </div>
+    </div>
+  </div>
 
-      <div class="label">Estado de nacimiento:</div>
-      <input type="text" value="Ciudad Ejemplo">
+  <div class="card">
+    <div class="card-header sub">Domicilio actual</div>
+    <div class="field-block">
+      <div class="green-label">Domicilio:</div>
+      <input type="text" value="Av. Ejemplo Ficticio">
 
-      <div class="label">Municipio de nacimiento:</div>
-      <input type="text" value="Municipio Ejemplo">
+      <div class="green-label">Colonia:</div>
+      <input type="text" value="Colonia Demo">
 
-      <div class="label">Estado civil:</div>
-      <input type="text" value="Soltero(a)">
+      <div class="row two">
+        <div><div class="green-label">Localidad:</div><input type="text" value="Ciudad Ejemplo"></div>
+        <div><div class="green-label">Código postal:</div><input class="mono" type="text" value="00000"></div>
+      </div>
+      <div class="row two" style="margin-top:14px;">
+        <div><div class="green-label">Estado (radica):</div><input type="text" value="Estado Ejemplo"></div>
+        <div><div class="green-label">Municipio (radica):</div><input type="text" value="Municipio Ejemplo"></div>
+      </div>
+      <div class="row two" style="margin-top:14px;">
+        <div><div class="green-label">Nacionalidad:</div><input type="text" value="Mexicano(a)"></div>
+        <div><div class="green-label">Teléfono:</div><input class="mono" type="text" value="0000000"></div>
+      </div>
 
-      <div class="label">CURP (ficticia):</div>
-      <input type="text" value="XXXX000101HDFXXX00">
+      <div class="green-label">Celular:</div>
+      <input class="mono" type="text" value="5500000000">
 
-      <div class="label">Correo electrónico:</div>
+      <div class="green-label">Correo electrónico:</div>
       <input type="text" value="estudiante.ejemplo@correo-ficticio.com">
     </div>
   </div>
 
-  <footer>
-    Página de práctica generada como ejemplo de maquetación con IA. Todos los datos son inventados y pueden editarse libremente en este formulario.
+  <div class="card">
+    <div class="card-header sub">Cambio de contraseña</div>
+    <div class="field-block">
+      <div class="green-label" style="color:var(--ink); font-weight:700;">Nueva contraseña:</div>
+      <input type="password" placeholder="••••••••">
+
+      <div class="green-label" style="color:var(--ink); font-weight:700;">Confirmar contraseña:</div>
+      <input type="password" placeholder="••••••••">
+
+      <div class="green-label" style="color:var(--ink); font-weight:700;">Contraseña actual:</div>
+      <input type="password" placeholder="••••••••">
+
+      <button class="modificar-btn" id="modificar-btn" type="button">Modificar</button>
+    </div>
+  </div>
+
+  <footer class="note">
+    Página de práctica hecha con IA como ejemplo de maquetación. Todos los datos son inventados; edita cualquier campo para probarlo. El botón "Modificar" es decorativo, no envía ni guarda información.
   </footer>
 
 </main>
 
 <script>
-  // Resalta en verde el campo de estado académico cuando dice "Activo"
-  const estado = document.getElementById('estado-academico');
+  const pill = document.getElementById('estado-pill');
+  const select = document.getElementById('estado');
   function syncEstado(){
-    const val = estado.value.trim().toLowerCase();
-    if(val.startsWith('activo')){
-      estado.style.color = '#166534';
-      estado.style.background = '#eafaf0';
-      estado.style.borderColor = '#8fd6ac';
-      estado.style.fontWeight = 'bold';
-    } else {
-      estado.style.color = '';
-      estado.style.background = '';
-      estado.style.borderColor = '';
-      estado.style.fontWeight = '';
-    }
+    const active = select.value.toLowerCase().startsWith('activo');
+    pill.classList.toggle('inactive', !active);
   }
-  estado.addEventListener('input', syncEstado);
+  select.addEventListener('change', syncEstado);
   syncEstado();
-</script>
 
+  document.getElementById('modificar-btn').addEventListener('click', () => {
+    alert('Esto es una maqueta de práctica: el botón no guarda ni envía ningún dato real.');
+  });
+</script>
 </body>
 </html>
